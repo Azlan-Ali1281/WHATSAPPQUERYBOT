@@ -1,0 +1,19 @@
+{
+  "name": "hotel-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp bot for hotel B2B queries",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.7",
+    "dotenv": "^17.2.3",
+    "openai": "^6.17.0",
+    "pino": "^8.17.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
