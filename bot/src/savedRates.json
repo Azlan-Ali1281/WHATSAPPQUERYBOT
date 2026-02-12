@@ -1,0 +1,67 @@
+[
+  {
+    "id": "HTL_VOCO_001",
+    "hotel_info": {
+      "name": "Voco Makkah",
+      "aliases": ["Voco","Vocco","Makkah Voco","Voco Hotel","Voco Towers"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": true,
+      "flat_till_pax": 4,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": false,
+      "default_extra_bed_rate": 0,
+      "surcharges": {
+        "views": {
+          "haram": 0,
+          "city": 0
+        },
+        "meals": {
+          "bb": 40,
+          "suhoor": 80,
+          "iftar": 80,
+          "suhoor_iftar": 160
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Current Season",
+        "start": "01-01",
+        "end": "02-17",
+        "rates": {
+          "weekday": { "single_double": 190, "extra_bed": 0 },
+          "weekend": { "single_double": 190, "extra_bed": 0 }
+        }
+      },
+        {
+        "description": "Current Season",
+        "start": "02-18",
+        "end": "02-22",
+        "rates": {
+          "weekday": { "single_double": 400, "extra_bed": 0 },
+          "weekend": { "single_double": 400, "extra_bed": 0 }
+        }
+      },
+        {
+        "description": "Current Season",
+        "start": "02-23",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 375, "extra_bed": 0 },
+          "weekend": { "single_double": 375, "extra_bed": 0 }
+        }
+      },
+        {
+        "description": "Current Season",
+        "start": "03-20",
+        "end": "04-18",
+        "rates": {
+          "weekday": { "single_double": 180, "extra_bed": 0 },
+          "weekend": { "single_double": 180, "extra_bed": 0 }
+        }
+      }
+    ]
+  }
+]

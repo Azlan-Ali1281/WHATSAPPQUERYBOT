@@ -33,6 +33,7 @@ const { findMatchingChild } = require('./vendorMatcher')
 const { isSimpleRate } = require('./vendorRateClassifier')
 const { calculateSimpleRate } = require('./vendorRateLogic')
 const { calculateComplexRate } = require('./vendorRateAI')
+const { checkSavedRate } = require('./rateStore');
 
 const VENDOR_SEND_DELAY_MS = 2000
 const RESPONSE_DELAY_MS = 20000
@@ -51,56 +52,42 @@ function extractRoomTypesFromText(text = '') {
   // 1. 👑 SPECIALTY / MODIFIED TYPES (Priority)
   // Captures: "Large Quad", "Diplomatic Suite", "Executive Triple", "Royal Room"
   const modifiers = "LARGE|SMALL|DIPLOMATIC|EXECUTIVE|ROYAL|RESIDENTIAL|PRESIDENTIAL|DELUXE|CLUB|JUNIOR|SENIOR|PANORAMA|GRAND|PREMIER|FAMILY|STUDIO|BUSINESS";
-  const baseTypes = "SINGLE|DOUBLE|DBL|TWIN|TRIPLE|TRP|QUAD|QUINT|SUITE|ROOM|BED";
+  const baseTypes = "SINGLE|DOUBLE|DBL|TWIN|TRIPLE|TRP|TPL|QUAD|QUINT|SUITE|ROOM|BED";
   
   // Regex: Finds "MODIFIER + BASE" (e.g., "LARGE QUAD")
   const complexRegex = new RegExp(`\\b(${modifiers})\\s+(${baseTypes})(?:S?)\\b`, 'gi');
   let m;
   while ((m = complexRegex.exec(t)) !== null) {
-    types.push(m[0]); // Pushes "LARGE QUAD"
+    types.push(m[0]); 
   }
 
   // 2. 🛡️ PAX / PERSON / GUEST MAPPING
-  // This converts "3 person", "3 pax", "3 guests" directly into room types
-  
-  // Single (1)
-  if (/\b(1\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i.test(t)) {
-    types.push('SINGLE');
-  }
+  // Converts "3 person", "3 pax", etc. directly into standard room types
+  const paxPatterns = [
+    { reg: /\b(1\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i, type: 'SINGLE' },
+    { reg: /\b(2\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i, type: 'DOUBLE' },
+    { reg: /\b(3\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i, type: 'TRIPLE' },
+    { reg: /\b(4\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i, type: 'QUAD' },
+    { reg: /\b(5\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i, type: 'QUINT' }
+  ];
 
-  // Double (2)
-  if (/\b(2\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i.test(t)) {
-    types.push('DOUBLE');
-  }
+  paxPatterns.forEach(p => {
+    if (p.reg.test(t)) types.push(p.type);
+  });
 
-  // Triple (3)
-  if (/\b(3\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i.test(t)) {
-    types.push('TRIPLE');
-  }
-
-  // Quad (4)
-  if (/\b(4\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i.test(t)) {
-    types.push('QUAD');
-  }
-
-  // Quint (5)
-  if (/\b(5\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE))\b/i.test(t)) {
-    types.push('QUINT');
-  }
-
-  // 3. 🏠 STANDARD TYPES (Fallback)
-  // We check these last so we don't accidentally duplicate if "Large Quad" was already found.
-  // However, we allow duplicates here because the main loop filters them out using `Set` later.
-  
+  // 3. 🏠 STANDARD TYPES & SHORTHAND (Fallback)
+  // Added TPL, DBL, and support for typos like "Quard"
   if (/\bSINGLE\b/i.test(t)) types.push('SINGLE');
   if (/\b(DBL|DOUBLE)\b/i.test(t)) types.push('DOUBLE');
-  if (/\b(TRP|TRIPLE|TRIPPLE)\b/i.test(t)) types.push('TRIPLE');
+  if (/\b(TPL|TRP|TRIPLE|TRIPPLE)\b/i.test(t)) types.push('TRIPLE');
   if (/\b(QUAD|QUARD|QAD|QUADR)\b/i.test(t)) types.push('QUAD');
   if (/\b(QUINT|QUINTU|QUINTUPLE)\b/i.test(t)) types.push('QUINT');
+  if (/\b(SUITE|ROOMS?|BEDS?)\b/i.test(t)) {
+     // Only add 'SUITE' if it's explicitly written
+     if (t.includes('SUITE')) types.push('SUITE');
+  }
 
   // 4. Return unique list
-  // Uses Set to remove duplicates (e.g. if it found "Large Quad" and "Quad", keep both or just specific?)
-  // We return ALL matches so the main loop can pick the most specific one.
   return [...new Set(types)];
 }
 
@@ -207,15 +194,14 @@ function isRoomOnlyLine(line = '') {
 // 🔒 PURE DATE LINE DETECTOR
 // ======================================================
 function isPureDateLine(text = '') {
-  // 🛡️ Remove "Check in", "Check out", "Arr", "Dep" before checking
   const t = text.trim().toLowerCase()
-    .replace(/^(check\s*(in|out|inn)|arr|dep|arrival|departure|from|to)[:\s-]*/i, '')
+    .replace(/^(check\s*(in|out|inn|date)|arr|dep|arrival|departure|from|to)[:\s-]*/i, '')
     .trim();
 
   if (!t) return false;
 
-  // Matches "05 march", "5 mar", "20-feb"
-  const datePattern = /^\d{1,2}[\s-]* (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i;
+  // Supports "9th Apri", "25th March", "5 mar", "10 Marc"
+  const datePattern = /^\d{1,2}(?:st|nd|rd|th)?[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i;
   return datePattern.test(t);
 }
 
@@ -226,25 +212,30 @@ function normalizeHotelForAI(hotel = '') {
   let h = hotel.trim();
   if (!h || h.toLowerCase() === 'similar') return null;
 
-  // 1. 🛡️ DATE & NUMBER BLOCKER
+  // 🛡️ NEW: Address & Zip Code Guard
+  // Rejects lines like "Makkah 21955" or "Ibrahim Al Khalil"
+  if (/\b\d{5}\b/.test(h)) return null; // Blocks 5-digit zip codes
+  if (/^(makkah|madinah|saudi arabia|street|road|district|jabal omar ibrahim al khalil)$/i.test(h)) return null;
+
+  // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
+  // Added 'nights' and 'date' to prevent "Nights: 6" or "Check-in Date" issues
+  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date)\b/i;
+  if (badPatterns.test(h)) return null;
+
+  // 🛡️ 2. DATE & NUMBER BLOCKER
   if (/^\d{1,2}[\/\-]\d{1,2}/.test(h)) return null;
-  if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(h)) return null;
   if (/^[\d\s\-\/\.]+$/.test(h)) return null;
   if (h.length < 3) return null;
   if (/^hotel$/i.test(h)) return null;
 
-  // 2. 🛡️ BRAND PROTECTION (Fixes "Double Tree" -> "Tree")
-  // Merge "Double Tree" so the word "Double" isn't stripped later
+  // 🛡️ 3. BRAND PROTECTION
   h = h.replace(/\b(double|dbl)\s*tree\b/gi, 'DoubleTree');
-  h = h.replace(/\b(fundaq|fudnaq)\b/gi, 'Fundaq'); // Fix common spelling
+  h = h.replace(/\b(fundaq|fudnaq)\b/gi, 'Fundaq');
 
-  // 3. 🛡️ GUEST NAME BLOCKER
-  const guestIndicators = /\b(mr|mrs|ms|guest|name|lead|contact|pax|attn|attention|ali|ahmed|muhammad|hussain|khan|paras|kayani)\b/i;
-  
-  // 4. 🛡️ HOTEL KEYWORD LIST
-  const hotelKeywords = /\b(hotel|inn|suites|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|fundaq|bilal|elaf|kindi|bosphorus)\b/i;
+  // 🛡️ 4. HOTEL KEYWORD LIST
+  const hotelKeywords = /\b(hotel|inn|suites|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar)\b/i;
 
-  // 🛡️ NOISE CLEANER (Strips "Double", "Quad", etc.)
+  // 🛡️ NOISE CLEANER
   h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|quard|room|only|bed|breakfast|bb|ro)\b/gi, '').trim();
 
   const words = h.split(/\s+/).filter(Boolean);
@@ -257,12 +248,10 @@ function normalizeHotelForAI(hotel = '') {
     if (!isBrand && !isCode) return null; 
   }
 
-  // 2+ WORD CHECK
-  if (words.length >= 2) {
-    if (guestIndicators.test(h) && !hotelKeywords.test(h)) return null;
-  }
+  // 🛡️ GUEST NAME BLOCKER
+  const guestIndicators = /\b(mr|mrs|ms|guest|name|lead|contact|pax|attn|attention|ali|ahmed|muhammad|hussain|khan|paras|kayani)\b/i;
+  if (words.length >= 2 && guestIndicators.test(h) && !hotelKeywords.test(h)) return null;
 
-  // CASE FORMATTING
   if (/^[A-Z]{3,7}$/.test(h)) return `Hotel ${h}`;
 
   return h;
@@ -311,18 +300,26 @@ async function startBot() {
     console.log('Text:', rawText)
 
 if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
-      let effectiveText = normalizeSlashDateRange(rawText);
+      
+      // 🛡️ 0. DD/MM/YYYY FORMAT CONVERTER
+      let effectiveText = rawText.replace(/(\d{1,2})\/(\d{1,2})\/(\d{4})/g, (match, d, m, y) => {
+          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          const monthIndex = parseInt(m) - 1;
+          return (monthIndex >= 0 && monthIndex < 12) ? `${d} ${months[monthIndex]} ${y}` : match;
+      });
+
+      effectiveText = normalizeSlashDateRange(effectiveText);
       effectiveText = normalizeMultiLineDateRange(effectiveText);
       
-      // 🛡️ 1. DATE FORMAT FIXER
+      // 🛡️ 1. FORGIVING DATE FORMAT FIXER
       effectiveText = effectiveText.replace(
-        /(\d{1,2}\s*[a-z]{3,9})\s*[\/]\s*(\d{1,2}\s*[a-z]{3,9})/gim, 
-        '$1 to $2'
+        /(\d{1,2}(?:st|nd|rd|th)?\s*)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*/gim, 
+        '$1 $2'
       );
 
-      // 🛡️ 2. FORCE MERGE CHECK-IN / CHECK-OUT PAIRS
+      // 🛡️ 2. AGGRESSIVE CHECK-IN/OUT MERGER
       effectiveText = effectiveText.replace(
-        /(?:check\s*[-]?\s*(?:in|inn|int)|arr|arrival|from)\s*[:\s-]*(\d{1,2}\s*[a-z]{3,9}.*?)\s*\n\s*(?:check\s*[-]?\s*(?:out|outt)|dep|departure|to)\s*[:\s-]*(\d{1,2}\s*[a-z]{3,9}.*?)(?=$|\n)/gim,
+        /(?:check\s*[-]?\s*(?:in|inn|int|date)|arr|arrival|from)\s*[:\s-]*(\d{1,2}(?:st|nd|rd|th)?\s*[a-z]{3,9}.*?)\s*\n\s*(?:check\s*[-]?\s*(?:out|outt|date)|dep|departure|to)\s*[:\s-]*(\d{1,2}(?:st|nd|rd|th)?\s*[a-z]{3,9}.*?)(?=$|\n)/gim,
         '$1 to $2'
       );
 
@@ -342,13 +339,17 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       }
       effectiveText = lines.filter(l => l !== '').join('\n');
 
-      const universalTypes = extractRoomTypesFromText(rawText);
+      // 🛡️ 5. ADDRESS NOISE REMOVER
+      effectiveText = effectiveText.split('\n')
+        .filter(line => !/\b\d{5}\b/.test(line))
+        .filter(line => !/^(makkah|madinah|saudi arabia|street|road|district)$/i.test(line.trim()))
+        .join('\n');
 
-      // Final regex cleanup for tight multi-line dates
+      // Final regex cleanup
       effectiveText = effectiveText.replace(
         /(\d{1,2}\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\s*\n\s*(\d{1,2}\s*\2)/i,
         '$1 to $3'
-      )
+      );
 
       let segmentation
       try {
@@ -360,32 +361,17 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return
       }
 
-      let { blocks, global } = segmentation || {}
-      global = global || {}
-
+      let { blocks } = segmentation || {}
+      
       if (Array.isArray(blocks)) {
-        blocks = blocks
-          .map(b => ({
+        blocks = blocks.map(b => ({
             ...b,
             dates: (b.dates || '').trim(),
             hotels: Array.isArray(b.hotels) ? b.hotels.map(h => h.trim()).filter(Boolean) : []
-          }))
-          .filter(b => b.dates || b.hotels.length)
+          })).filter(b => b.dates || b.hotels.length)
       }
 
-      // 🛡️ DATE SPAM GUARD
-      if (Array.isArray(blocks) && blocks.length > 5) {
-        const firstDate = blocks[0].dates;
-        const lastDate = blocks[blocks.length - 1].dates;
-        const firstHotel = blocks[0].hotels?.[0];
-        if (firstHotel && blocks.every(b => !b.hotels.length || b.hotels[0] === firstHotel)) {
-          const cleanFirst = firstDate.split('to')[0].trim();
-          const cleanLast = lastDate.split('to').pop().trim();
-          blocks = [{ dates: `${cleanFirst} to ${cleanLast}`, hotels: [firstHotel] }];
-        }
-      }
-
-      // Fill in hotel names if missing in block
+      // Fill in hotel names if missing
       if (Array.isArray(blocks)) {
         for (const block of blocks) {
           if (!Array.isArray(block.hotels) || block.hotels.length === 0) {
@@ -407,7 +393,6 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       const parent = createParent({ clientGroupId: groupId, originalMessage: msg })
       const allQueries = []
       
-      // Global Fallback
       const globalDateRanges = [];
       const dateRegex = /(\d{1,2})[\s-]*(?:to|[-/]|and)[\s-]*(\d{1,2})[\s-]*([a-z]{3,9})/gi;
       let dateMatch;
@@ -415,16 +400,14 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           globalDateRanges.push(`${dateMatch[1]} ${dateMatch[3]} to ${dateMatch[2]} ${dateMatch[3]}`);
       }
 
-      // --- START OF FIXED BLOCK LOOP ---
+      // --- START OF COMPLETE BLOCK LOOP ---
+      let lastKnownHotels = []; 
+
       for (const block of blocks) {
-        
         let blockDateList = [];
         if (block.dates) {
           const rawLines = block.dates.split('\n').map(l => l.trim()).filter(Boolean);
-          const cleanLines = rawLines.map(l => 
-            l.replace(/^(check\s*[-]?\s*(in|out|inn)|arr|dep|arrival|departure|from|to)[:\s-]*/i, '').trim()
-          );
-
+          const cleanLines = rawLines.map(l => l.replace(/^(check\s*[-]?\s*(in|out|inn|date)|arr|dep|arrival|departure|from|to)[:\s-]*/i, '').trim());
           const mergedDates = [];
           for (let i = 0; i < cleanLines.length; i++) {
             const current = cleanLines[i];
@@ -432,119 +415,97 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             if (next && isPureDateLine(current) && isPureDateLine(next) && !current.toLowerCase().includes('to')) {
               mergedDates.push(`${current} to ${next}`);
               i++; 
-            } else {
-               if (isPureDateLine(current) || current.includes('to') || current.includes('-')) {
-                  mergedDates.push(current);
-               }
+            } else if (isPureDateLine(current) || current.includes('to') || current.includes('-')) {
+              mergedDates.push(current);
             }
           }
           blockDateList = mergedDates;
         }
+        if (blockDateList.length === 0 && globalDateRanges.length > 0) blockDateList = globalDateRanges;
 
-        if (blockDateList.length === 0 && globalDateRanges.length > 0) {
-           blockDateList = globalDateRanges;
-        }
-
-        // 2. SPLIT HOTELS
         let rawHotelList = block.hotels || [];
         let splitHotels = [];
         for (const rh of rawHotelList) {
-          const parts = rh.split(/\s*\/\s*|\s+or\s+|\s*&\s*|,\s*/i).map(h => h.trim()).filter(Boolean);
+          const parts = rh.split(/\s*\/\s*|\s+or\s+|\s*&\s*|,\s*|\n/i).map(h => h.trim()).filter(Boolean);
           splitHotels.push(...parts);
         }
 
-        // 3. PROCESS EACH HOTEL
+        const isAgain = rawText.toUpperCase().includes('AGAIN') || rawText.toUpperCase().includes('SAME');
+        if ((splitHotels.length === 0 || (splitHotels.length === 1 && /AGAIN|SAME/i.test(splitHotels[0]))) && isAgain) {
+           if (lastKnownHotels.length > 0) splitHotels = lastKnownHotels;
+        } else {
+           const validNow = splitHotels.map(h => normalizeHotelForAI(h)).filter(Boolean);
+           if (validNow.length > 0) lastKnownHotels = validNow;
+        }
+
         for (const hotelName of splitHotels) {
           const hotel = normalizeHotelForAI(hotelName);
           if (!hotel) continue;
 
-          // Find context line but ALSO pass full text
-          const fullLineFromText = effectiveText.split('\n').find(line => 
-            line.toLowerCase().includes(hotelName.toLowerCase())
-          ) || hotelName;
-
-          const lineTypes = extractRoomTypesFromText(fullLineFromText);
+          const fullLine = effectiveText.split('\n').find(l => l.toLowerCase().includes(hotelName.toLowerCase())) || hotelName;
+          const lineTypes = extractRoomTypesFromText(fullLine);
           const activeTypes = lineTypes.length > 0 ? lineTypes : universalTypes;
-
           const mealHint = extractMeal(effectiveText);
           const viewHint = extractView(effectiveText);
 
-          // 4. CROSS-MATCH
           for (const dateRange of blockDateList) {
-            
-            const aiInputLines = [
-              `DATES: ${dateRange}`,
-              `HOTEL: ${hotel}`,
-              `FULL_CONTEXT: ${effectiveText}`, 
-              `ROOMS_HINT: ${activeTypes.join(' ')}`,
-              `MEAL_HINT: ${mealHint}`,
-              `VIEW_HINT: ${viewHint}`,
-              `STRICT: Extract check_in and check_out for ${dateRange} ONLY.`,
-              `CRITICAL: Only include meal/view if they appear NEAR the hotel '${hotel}' or apply to the whole group.`
-            ];
+            const aiInput = protectDoubleTreeHotel([
+              `DATES: ${dateRange}`, `HOTEL: ${hotel}`, `CONTEXT: ${effectiveText}`, 
+              `ROOMS: ${activeTypes.join(' ')}`, `MEAL_HINT: ${mealHint}`, `VIEW_HINT: ${viewHint}`,
+              `STRICT: Extract check_in and check_out for ${dateRange} ONLY.`
+            ].join('\n'));
 
-            const aiInput = protectDoubleTreeHotel(aiInputLines.join('\n').trim());
-            
             let ai;
-            try { 
-              ai = await parseClientMessageWithAI(aiInput);
-            } catch (err) { continue; }
-
+            try { ai = await parseClientMessageWithAI(aiInput); } catch (err) { continue; }
             if (!ai?.queries) continue;
 
             for (const qRaw of ai.queries) {
               const q = { ...qRaw };
               
-              if (dateRange.includes('to') && q.check_in === q.check_out) continue;
-              if (!dateRange.includes('to') && q.check_in === q.check_out) {
-                 const isOneNightExplicit = /\b(1|one)\s*night\b/i.test(effectiveText);
-                 if (!isOneNightExplicit) continue; 
+              // 🩹 NAN REPAIR
+              if (q.check_out && q.check_out.includes('NaN')) {
+                 const dLow = dateRange.toLowerCase();
+                 if (dLow.includes('apri')) q.check_out = q.check_out.replace(/-NaN-/, '-04-');
+                 if (dLow.includes('marc')) q.check_out = q.check_out.replace(/-NaN-/, '-03-');
               }
 
+              if (!normalizeHotelForAI(q.hotel)) q.hotel = hotel;
+
+              const cIn = new Date(q.check_in);
+              const cOut = new Date(q.check_out);
+              if (isNaN(cIn.getTime()) || isNaN(cOut.getTime())) continue;
+
+              // Force Merged Dates Logic
+              if (dateRange.includes('to') && q.check_in === q.check_out) continue;
+              if (!dateRange.includes('to') && q.check_in === q.check_out && !/\b(1|one)\s*night\b/i.test(effectiveText)) continue;
+
               if (q.confidence === 0) continue;
-
-              q.hotel = hotel;
-
-              // Apply Hints
+              
               if (!q.meal && mealHint) q.meal = mealHint;
               if (!q.view && viewHint) q.view = viewHint;
 
-              // ---------------------------------------------------------
-              // 👑 ROOM TYPE LOGIC (FIXED: Combines "Royal Suite" + "7 Pax")
-              // ---------------------------------------------------------
-
-              // 1. Force Upgrade to Complex Type (e.g. "ROYAL SUITE")
+              // 👑 NEW: STRICT ROOM TYPE LOGIC
               if (activeTypes.length > 0) {
-                 const bestMatch = activeTypes.find(t => 
-                   q.room_type.toUpperCase().includes(t) || t.includes(q.room_type.toUpperCase())
-                 );
-                 if (bestMatch && bestMatch.length > q.room_type.length) {
-                    q.room_type = bestMatch;
-                 } else if (activeTypes.length === 1 && /^(SUITE|ROOM|QUAD|TRIPLE|DOUBLE)$/i.test(q.room_type)) {
-                    q.room_type = activeTypes[0];
-                 }
+                 let match = activeTypes.find(t => q.room_type.toUpperCase().includes(t) || t.includes(q.room_type.toUpperCase()));
+                 if (!match) match = activeTypes[0];
+                 const aiAddedExtra = q.room_type.toUpperCase().includes('EXTRA');
+                 const userSaidExtra = effectiveText.toUpperCase().includes('EXTRA') || effectiveText.toUpperCase().includes('SHARING');
+                 
+                 if (aiAddedExtra && !userSaidExtra) q.room_type = match; 
+                 else q.room_type = match;
+              } else {
+                 if (!q.room_type || !q.room_type.trim() || q.room_type.toUpperCase() === 'ROOM') q.room_type = 'DOUBLE + EXTRA BED';
               }
+              // ============================================================
 
-              // 2. Append Pax for Large Groups (The Fix)
               if (typeof q.persons === 'number' && q.persons >= 5) {
-                 const paxString = `${q.persons}`;
-                 if (!q.room_type.includes(paxString)) {
-                    q.room_type = `${q.room_type} ${q.persons} PAX`;
+                 const paxString = `${q.persons} PAX`;
+                 if (!q.room_type.toUpperCase().includes(paxString)) {
+                    q.room_type = `${q.room_type} ${paxString}`;
                  }
               }
               
-              // 3. Final Fallbacks
-              if (!q.room_type || !q.room_type.trim()) q.room_type = 'DOUBLE';
               if (!q.rooms || q.rooms < 1) q.rooms = 1;
-              // ---------------------------------------------------------
-
-              if (q.check_in && !q.check_out && dateRange) {
-                const m = dateRange.match(/(\d{1,2}).*(to|-|\/|and).*(\d{1,2})/i);
-                if (m) {
-                  const day = m[m.length - 1].trim().padStart(2, '0');
-                  q.check_out = q.check_in.replace(/\d{2}$/, day);
-                }
-              }
 
               if (q.check_in && q.check_out) {
                 allQueries.push(q);
@@ -553,7 +514,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           } 
         } 
       } 
-      // --- END OF FIXED BLOCK LOOP ---
+      // --- END OF COMPLETE BLOCK LOOP ---
 
       if (!allQueries.length) {
         for (const owner of getOwnerGroups()) {
@@ -562,8 +523,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return
       }
 
-      await sock.sendMessage(groupId, { text: 'checking' }, { quoted: msg })
-
+      // 1. Deduplication
       const seen = new Set()
       const finalQueries = allQueries.filter(q => {
         const k = `${q.hotel}|${q.check_in}|${q.check_out}|${q.rooms}|${q.room_type}|${q.view}|${q.meal}`
@@ -572,19 +532,82 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return true
       })
 
-      for (const q of finalQueries) {
-        const child = createChild({ parentId: parent.id, parsed: q })
-        const vendors = getVendorsForHotel(q.hotel)
-        console.log('📤 Sending to vendors:', q.hotel, '→', vendors)
+      // 2. Split: Saved Rates vs. Vendors
+      const queriesWithRates = [];
+      const queriesForVendors = [];
 
-        for (const vg of vendors) {
-          const sent = await sock.sendMessage(vg, { text: formatQueryForVendor(child) })
-          if (sent?.key?.id) linkVendorMessage(child.id, sent.key.id)
-          await sleep(VENDOR_SEND_DELAY_MS)
-        }
+      for (const q of finalQueries) {
+        // To THIS:
+        const myRate = checkSavedRate(
+            q.hotel, 
+            q.check_in, 
+            q.check_out, 
+            q.persons || 2, 
+            q.room_type, 
+            q.view, // Pass the view
+            q.meal  // Pass the meal
+        );
+          if (myRate) {
+              queriesWithRates.push({ query: q, rate: myRate });
+          } else {
+              queriesForVendors.push(q);
+          }
+      }
+
+// 3. HANDLE SAVED RATES (Instant Reply)
+      for (const item of queriesWithRates) {
+          const { query, rate } = item;
+
+          // 🧠 DESCRIPTOR SPLITTING
+          const fullType = rate.room_descriptor || 'Room';
+          const modifiers = ["DIPLOMATIC", "EXECUTIVE", "ROYAL", "PRESIDENTIAL", "DELUXE", "CLUB", "GRAND", "PREMIER"];
+          
+          let descriptor = '';
+          let typeClean = fullType;
+
+          for (const mod of modifiers) {
+             if (fullType.toUpperCase().includes(mod)) {
+                 descriptor = mod;
+                 typeClean = fullType.replace(new RegExp(mod, 'gi'), '').trim();
+                 break;
+             }
+          }
+
+          // 🧮 CALCULATION: Get Average Rate
+          const totalAmount = rate.breakdown.reduce((sum, b) => sum + b.price, 0);
+          const nightCount = rate.breakdown.length;
+          const averageRate = Math.round(totalAmount / nightCount); // Round to nearest SAR
+
+          // 📝 THE CLEAN FORMAT
+          const mealViewLine = `${rate.applied_meal}${rate.applied_view ? ` / ${rate.applied_view}` : ''}`;
+
+          const replyText = 
+`*${rate.hotel}*
+${descriptor ? `*${descriptor}* ` : ''}${typeClean}
+${mealViewLine}
+
+*${averageRate} ${rate.currency}*
+
+*Subject to Availability*`;
+          
+          await sock.sendMessage(groupId, { text: replyText }, { quoted: msg });
+      }
+
+      // 4. Vendor Broadcast (If needed)
+      if (queriesForVendors.length > 0) {
+          await sock.sendMessage(groupId, { text: 'checking' }, { quoted: msg });
+          for (const q of queriesForVendors) {
+              const child = createChild({ parentId: parent.id, parsed: q });
+              const vendors = getVendorsForHotel(q.hotel);
+              console.log('📤 Sending to vendors:', q.hotel, '→', vendors);
+              for (const vg of vendors) {
+                  const sent = await sock.sendMessage(vg, { text: formatQueryForVendor(child) });
+                  if (sent?.key?.id) linkVendorMessage(child.id, sent.key.id);
+                  await sleep(VENDOR_SEND_DELAY_MS);
+              }
+          }
       }
     }
-
     if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
       if (PRODUCTION_MVP_MODE) return
 
