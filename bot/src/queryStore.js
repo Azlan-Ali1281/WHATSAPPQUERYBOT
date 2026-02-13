@@ -79,6 +79,32 @@ function addVendorReply(childId, reply) {
   return null
 }
 
+// ======================================================
+// 🧠 CONVERSATIONAL STATE (New Feature)
+// ======================================================
+const userState = new Map();
+
+function setPendingQuestion(groupId, data) {
+    // data = { originalText: "Voco 12 feb", missing: "ROOM_TYPE" }
+    userState.set(groupId, { ...data, timestamp: Date.now() });
+}
+
+function getPendingQuestion(groupId) {
+    const state = userState.get(groupId);
+    if (!state) return null;
+    
+    // Expire after 5 minutes to prevent confusion
+    if (Date.now() - state.timestamp > 5 * 60 * 1000) {
+        userState.delete(groupId);
+        return null;
+    }
+    return state;
+}
+
+function clearPendingQuestion(groupId) {
+    userState.delete(groupId);
+}
+
 module.exports = {
   createParent,
   getParent,
@@ -86,5 +112,8 @@ module.exports = {
   getOpenChildren,
   addVendorReply,
   linkVendorMessage,
-  getChildByVendorMessage
+  getChildByVendorMessage,
+  setPendingQuestion,
+  getPendingQuestion,
+  clearPendingQuestion
 }
