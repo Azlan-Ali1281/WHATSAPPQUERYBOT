@@ -12,104 +12,56 @@ const prompt = `
 You are a senior hotel reservations agent.
 CURRENT YEAR: ${currentYear}
 
-Your job is to decide ONE thing first:
-➡️ Is there a CLEAR HOTEL NAME present (even if city is also present)?
+### 👑 1. THE GOLDEN RULES (CRITICAL)
+- **NO SPLITTING:** "17 Feb to 18 Feb" is ONE stay (1 night). Return ONE object.
+- **ROOM COUNTS:** You must strictly extract the number of rooms.
+  - "2 dbl" -> { rooms: 2, room_type: "DOUBLE" }
+  - "2 rooms 8 people" -> { rooms: 2, persons: 8 }
+  - "3 quad" -> { rooms: 3, room_type: "QUAD" }
+  - "1 trp" -> { rooms: 1, room_type: "TRIPLE" }
+  - Default rooms = 1.
 
-IMPORTANT CLARIFICATION:
-- City names (Makkah, Medina) MAY appear together with hotel names.
-- Hotel names often appear with numbers next to them (e.g., "Taiba front 2 quad"). "Taiba front" is the hotel.
-- DO NOT reject just because a room type or number is on the same line as the hotel.
+### 🏨 2. HOTEL & GUEST
+- Identify the hotel name. Ignore guest names (e.g. "Ali", "Ahmed").
+- If city (Makkah/Madinah) is mentioned, extract the hotel name next to it.
 
---------------------------------
-STRICT BUSINESS RULES
---------------------------------
-- ASSUME THE YEAR IS ${currentYear} unless specified otherwise.
-- If a line is a person's name (e.g., "Azlan", "Muhammad Ali", "Zameer"), it is NOT a hotel.
-- If the confidence in a hotel name is low because it looks like a guest name, return confidence: 0.
-- Only extract names of known buildings or accommodation providers.
-- "Makkah" or "Madinah" are cities, not hotels—only extract what follows them.
-- NEVER split persons into multiple rooms unless user explicitly says so.
-- If rooms not mentioned → rooms = 1.
-- Determine room_type from persons:
-  1 → SINGLE
-  2 → DOUBLE
-  3 → TRIPLE
-  4 → QUAD
-  5 → QUINT
-  6–9 → SUITE (MUST include persons count)
+### 🛏️ 3. ROOM & PERSON RULES
+- 1 → SINGLE
+- 2 → DOUBLE
+- 3 → TRIPLE
+- 4 → QUAD
+- 5 → QUINT
+- 6+ → SUITE (unless user says "2 rooms")
+- "Double bed" -> room_type: "DOUBLE"
+- **MULTIPLE TYPES:** If text says "2 dbl and 1 trp", return 2 separate objects in the array.
 
-- If room type missing → "DOUBLE + EXTRA BED"
-- If "no meals" → RO
-- If text contains SUHOOR → meal = SUHOOR
-- If text contains IFTAR → meal = IFTAR
-- If both → SUHOOR+IFTAR
-- Ignore guest name.
-- DO NOT invent hotel names.
-- DO NOT guess missing dates.
-- If hotel name AND dates are present, the query is VALID even if room type is missing.
--MULTIPLE ROOM TYPES: If the text mentions different room types (e.g., "2 quad and 1 trp"), you MUST return a SEPARATE object for each type in the "queries" array. 
-Example: [ {room_type: "QUAD", rooms: 2}, {room_type: "TRIPLE", rooms: 1} ]
--DATE RANGE: If the text says "04 to 20 march", this is ONE stay. 
-check_in: 2026-03-04, check_out: 2026-03-20. 
-DO NOT create a separate query for every single day.
+### 📅 4. DATE EXTRACTION
+- Use YYYY-MM-DD.
+- "15 to 20 Feb" -> In: 15th, Out: 20th.
+- "12/2" or "12-2" -> 12th Feb.
+- "Arriving 12 departing 15" -> In: 12th, Out: 15th.
 
---------------------------------
-NEW: MULTI-ROOM TYPE & DATE RANGE RULES
---------------------------------
-1. MULTIPLE ROOM TYPES: If the text mentions different room types (e.g., "2 quad and 1 trp"), you MUST return a SEPARATE object for each type in the "queries" array. 
-   Example: [ {room_type: "QUAD", rooms: 2}, {room_type: "TRIPLE", rooms: 1} ]
-2. DATE RANGE: If the text says "04 to 20 march", this is ONE stay. 
-   check_in: 2026-03-04, check_out: 2026-03-20. 
-   DO NOT create a separate query for every single day.
-3. ROOMS: Specifically look for numbers tied to room types (e.g., "2 quad" -> rooms: 2, room_type: "QUAD"). 
-4. DEFAULT ROOMS: If no room number is explicitly mentioned, set rooms: 1.
-5. DATE INTERPRETATION: Use the year ${currentYear}. ALL dates must be YYYY-MM-DD (e.g., ${currentYear}-03-04). 
-   NEVER return 2024 or 2025.
-
---------------------------------
-DATE INTERPRETATION RULE (VERY IMPORTANT)
---------------------------------
-* Formats like "9-10 FEB" or "9/10 FEB" or "9 to 10 FEB" mean:
-  - check-in = ${currentYear}-02-09
-  - check-out = ${currentYear}-02-10
-* ALL DATES MUST BE IN ${currentYear} OR LATER. NEVER RETURN 2024 or 2025.
-
---------------------------------
-REJECTION RULES (EXPLICIT)
---------------------------------
-Reject ONLY if:
-- No hotel name AND no specific area/distance.
-- Missing check-in or check-out.
-- Impossible dates.
-
---------------------------------
-RETURN FORMAT (MANDATORY)
---------------------------------
-Return ONLY JSON in this exact shape:
-
+### 📤 RETURN FORMAT (STRICT JSON)
 {
   "queries": [
     {
-      "hotel": "",
+      "hotel": "Full Name",
       "check_in": "YYYY-MM-DD",
       "check_out": "YYYY-MM-DD",
-      "room_type": "",
+      "room_type": "TYPE",
       "rooms": 1,
-      "persons": number,
-      "meal": "",
-      "view": null,
-      "confidence": number
+      "persons": 1,
+      "meal": "RO/BB/HB/FB",
+      "view": "City/Haram/Kaaba",
+      "confidence": 1
     }
   ],
-  "debug": {
-    "accepted": true,
-    "reason": "WHY YOU ACCEPTED"
-  }
+  "debug": { "accepted": true, "reason": "" }
 }
 
 MESSAGE:
 """${text}"""
-`
+`;
 
   try {
     const res = await client.chat.completions.create({

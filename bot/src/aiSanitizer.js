@@ -1,67 +1,88 @@
+// src/aiSanitizer.js
 require('dotenv').config();
 const OpenAI = require('openai');
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-async function sanitizeHotelNames(rawList) {
-  // 1. Remove obvious duplicates and empty strings
-  const uniqueInput = [...new Set(rawList.map(h => h.trim()).filter(Boolean))];
+// 📋 THE GOLDEN LIST (Matches your GroupConfig Keys exactly)
+const OFFICIAL_REGISTRY = [
+  // 🕌 MADINAH
+  "Anwar Al Madinah", "Saja Al Madinah", "Pullman Zamzam Madinah", "Madinah Hilton", 
+  "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Iman InterContinental", 
+  "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", 
+  "Leader Al Muna Kareem", "Odst Al Madinah", "Artal Al Munawara", "Zowar International", 
+  "Taiba Front", "Aqeeq Madinah", "Frontel Al Harithia", "Dallah Taibah", 
+  "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Province Al Sham",
   
-  if (uniqueInput.length === 0) return [];
+  // 🕋 MAKKAH (Clock Tower)
+  "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
+  "Raffles Makkah Palace", "Pullman Zamzam Makkah", "Movenpick Hajar Tower", 
+  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers",
 
-  const prompt = `
-  You are a Hotel Data Sanitizer for Makkah and Madinah.
-  
-  INPUT LIST: ${JSON.stringify(uniqueInput)}
-  
-  YOUR JOB:
-  1. FILTER OUT: Dates (e.g., "12 Feb", "14/20"), Prices ("500 SAR"), or Generic words ("Urgent", "Room", "Booking").
-  2. FIX SPELLING: Correct typos for real hotels.
-     - "Vocco" -> "Voco Makkah"
-     - "Bilul" -> "Bilal"
-     - "Kisswa" -> "Kiswah Towers"
-  3. PRESERVE KEYWORDS: "Fundaq" means Hotel. DO NOT DELETE IT.
-     - "Fundaq Bilul" -> "Fundaq Bilal" or "Hotel Bilal"
-  4. AMBIGUITY: If a text looks like a hotel name but you are unsure, KEEP IT. Do not delete it.
-  5. CITY NAMES: Keep city context (e.g. "Pullman ZamZam Madinah").
-  
-  OUTPUT:
-  Return ONLY a JSON Array of valid strings.
-  Example: ["Voco Makkah", "Swissotel Makkah", "Fundaq Bilal"]
+  // 🕋 MAKKAH (Haram/Jabal Omar)
+  "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 
+  "Conrad Makkah", "Jabal Omar Marriott", "Address Jabal Omar", 
+  "Sheraton Makkah Jabal Al Kaaba", "DoubleTree by Hilton Makkah", 
+  "Le Meridien Makkah", "Waqf Uthman",
+
+  // 🚌 MAKKAH (Aziziyah/Shuttle)
+  "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", 
+  "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah"
+];
+
+async function sanitizeHotelNames(rawHotels) {
+  if (!rawHotels || rawHotels.length === 0) return [];
+
+  const systemPrompt = `
+    You are the Guardian of the Hotel Database for Makkah and Madinah.
+    
+    ### 1. 📋 THE OFFICIAL REGISTRY (PRIORITY MATCHING)
+    Use the list below as the source of truth. 
+    If the user's input implies one of these hotels, output the **EXACT STRING** from this list.
+    
+    ${JSON.stringify(OFFICIAL_REGISTRY)}
+
+    ### 2. 🧠 MATCHING RULES
+    - **Exact Match:** "Makkah Hotel" -> "Makkah Hotel"
+    - **Fuzzy Match:** "Makah htl" -> "Makkah Hotel"
+    - **Ambiguity:** - "Hilton" -> "Hilton Makkah Convention" (Default preference)
+      - "Swiss" -> "Swissotel Makkah"
+      - "Voco" -> "Voco Makkah"
+      - "Anwar" -> "Anwar Al Madinah"
+      - "Kiswa" -> "Kiswa Towers"
+    - **Differentiation:**
+      - "Makkah Hotel" and "Makkah Towers" are DIFFERENT. Respect the user's choice.
+      - "Emaar Grand" vs "Emaar Elite" vs "Emaar Royal". Don't mix them.
+
+    ### 3. 🛡️ SANITIZATION RULES
+    - **Unknown Hotels:** If the hotel is VALID but NOT in the Official Registry (e.g. "Four Points"), just fix the spelling. DO NOT force it into the registry.
+    - **Garbage Removal:** - Remove dates ("5 mar"), room types ("Quad"), meals ("BB").
+      - If input is NOT a hotel (e.g. "2 rooms"), remove it entirely.
+
+    ### 4. OUTPUT
+    - Return a clean JSON array of strings.
   `;
 
   try {
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini', // Fast and cheap
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify(rawHotels) }
+      ],
+      temperature: 0.1, // Low temp for precision
     });
 
-    const content = response.choices[0].message.content;
-    const start = content.indexOf('[');
-    const end = content.lastIndexOf(']');
+    const rawContent = response.choices[0].message.content.trim();
+    const cleanJson = rawContent.replace(/```json|```/g, '').trim();
     
-    // If AI fails to return JSON, return original input
-    if (start === -1 || end === -1) {
-        console.warn("⚠️ Sanitizer returned invalid JSON, using raw input.");
-        return uniqueInput; 
-    }
-    
-    const parsed = JSON.parse(content.slice(start, end + 1));
-    
-    // 🛡️ SAFETY NET: If AI deleted everything but we had valid-looking inputs, revert.
-    if (parsed.length === 0 && uniqueInput.some(h => h.length > 4 && !/\d/.test(h))) {
-        console.warn("⚠️ Sanitizer deleted all names. Reverting to raw input.");
-        // Return uniqueInput but filter out obvious dates (strings with numbers)
-        return uniqueInput.filter(h => !/\d/.test(h));
-    }
-    
-    return parsed;
+    return JSON.parse(cleanJson);
 
   } catch (error) {
-    console.error("⚠️ Sanitizer Error:", error.message);
-    // Fallback: Return original input minus obvious dates
-    return uniqueInput.filter(h => !/\d{4}/.test(h)); 
+    console.error("⚠️ AI Sanitizer Failed:", error.message);
+    return rawHotels; 
   }
 }
 
