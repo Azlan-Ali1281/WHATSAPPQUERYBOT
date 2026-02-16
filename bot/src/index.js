@@ -27,11 +27,11 @@ const {
 // 🛡️ SAFETY LIMITS (Circuit Breaker)
 // ======================================================
 const LIMITS = {
-  MAX_TOTAL_REQUESTS: 5, // Hard cap: No more than 15 vendor msgs per user msg
-  MAX_DATE_RANGES: 2,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
-  MAX_HOTELS: 3,          // Max distinct hotels per query
-  MAX_ROOM_TYPES: 2,       // Max distinct room types per hotel
-  MAX_VENDORS_PER_HOTEL: 2 // 🛡️ NEW: How many vendors get the blast?
+  MAX_TOTAL_REQUESTS: 6, // Hard cap: No more than 15 vendor msgs per user msg
+  MAX_DATE_RANGES: 3,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
+  MAX_HOTELS: 4,          // Max distinct hotels per query
+  MAX_ROOM_TYPES: 1,       // Max distinct room types per hotel
+  MAX_VENDORS_PER_HOTEL: 6 // 🛡️ NEW: How many vendors get the blast?
 };
 
 const {
@@ -105,23 +105,51 @@ function extractRoomTypesFromText(text = '') {
 
   return [...new Set(types)];
 }
+
+// 🛠️ HELPER: Date Normalizer (Robost Multi-Line Merger)
+// 🛠️ HELPER: Date Normalizer (Gap-Jumping Version)
 function normalizeMultiLineDateRange(text = '') {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  let lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  
+  // Regex to capture strictly the date part
+  const dReg = /^(\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/i;
+  
+  for (let i = 0; i < lines.length - 1; i++) {
+    // 1. Check Current Line
+    const cleanL1 = lines[i].replace(/^(check\s*[-]?\s*(in|out|inn|date)|arr|dep|from|to)[:\s-]*/i, '').trim();
+    const m1 = cleanL1.match(dReg);
 
-  if (lines.length >= 2) {
-    const d1 = lines[0].match(/^(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i)
-    const d2 = lines[1].match(/^(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i)
+    if (!m1) continue;
 
-    if (d1 && d2 && d1[2].toLowerCase() === d2[2].toLowerCase()) {
-      return [
-        `${d1[1]} ${d1[2]} to ${d2[1]} ${d2[2]}`,
-        ...lines.slice(2)
-      ].join('\n')
+    // 2. Look Ahead (Next Line OR Line After Next)
+    // We allow a "gap" of 1 line if it's just a separator (like "to", "-", "check out")
+    let j = i + 1;
+    let cleanL2 = lines[j].replace(/^(check\s*[-]?\s*(in|out|inn|date)|arr|dep|from|to)[:\s-]*/i, '').trim();
+    let m2 = cleanL2.match(dReg);
+
+    // If next line is NOT a date, check if it's a separator, then look at i+2
+    if (!m2 && j + 1 < lines.length) {
+        const isSeparator = /^(to|and|-|check\s*out|until|thru|through)$/i.test(lines[j]) || lines[j].length < 4;
+        if (isSeparator) {
+            j = i + 2; // Jump gap
+            cleanL2 = lines[j].replace(/^(check\s*[-]?\s*(in|out|inn|date)|arr|dep|from|to)[:\s-]*/i, '').trim();
+            m2 = cleanL2.match(dReg);
+        }
+    }
+
+    // 3. Merge if found
+    if (m1 && m2) {
+       lines[i] = `${m1[1]} to ${m2[1]}`;
+       
+       // Clear consumed lines
+       for (let k = i + 1; k <= j; k++) {
+           lines[k] = ''; 
+       }
+       i = j; // Skip iterator
     }
   }
-  return text
+  return lines.filter(Boolean).join('\n');
 }
-
 
 function extractMeal(text = '') {
   const t = text.toUpperCase();
@@ -192,36 +220,38 @@ function normalizeSlashDateRange(text = '') {
 }
 
 // ======================================================
-// 🔒 ROOM WORD GUARD
+// 🔒 ROOM WORD GUARD (Stricter Number Check)
 // ======================================================
 function isRoomOnlyLine(line = '') {
   const t = line.trim().toLowerCase();
   if (!t) return true;
 
-  // 1. DATES (Reject lines like "5 to 10 mar", "12 feb")
+  // 🛡️ 0. WHITELIST: If it has a Hotel Brand, it is VALID (Return false to keep it)
+  const hotelBrands = /\b(hilton|swiss|marriot|Marriott|voco|pullman|anwar|saja|kiswa|tower|hotel|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|ghufran|shaza|millennium|copthorne|taiba|front|aram|artal|zn|fundaq|grand|oberoi)\b/i;
+  if (hotelBrands.test(t)) return false;
+
+  // 🛡️ 1. NUMBER START GUARD (Fixes "1 dbl with extra bed")
+  // If line starts with a number AND contains room/bed/pax keywords -> REJECT IT.
+  if (/^\d/.test(t) && /\b(dbl|double|trp|triple|quad|quint|bed|pax|room|guest|night|sharing)\b/i.test(t)) {
+      return true;
+  }
+
+  // 2. DATES
   if (/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(t)) return true;
   if (/check\s*(in|out)|arr|dep|from|to/i.test(t)) return true;
 
-  // 2. GUEST NAMES / METADATA
-  const guestLock = /\b(guest|name|nam|lead|mr|mrs|ms|pax|ref|contact|phone|booking|attention|attn)\b/i;
-  if (guestLock.test(t)) return true;
-
-  // 3. ROOMS / MEALS / VIEWS (The "Not a Hotel" Dictionary)
-  // Added: ro, bb, hb, fb, view, city, haram, kaaba
-  const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|bed|beds|view|veiw|vew|city|haram|kaaba|ro|bb|hb|fb|breakfast)\b/i;
+  // 3. KEYWORD DICTIONARY
+  const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|bed|beds|view|veiw|vew|city|haram|kaaba|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
   
-  // Single word check (e.g. just "Quad")
   if (t.split(/\s+/).length === 1 && roomLock.test(t)) return true;
 
-  // Multi-word check: If EVERY word is a keyword or number, it's not a hotel
-  // e.g. "2 dbl ro" -> 2(num), dbl(room), ro(meal) -> TRUE (Blocked)
   const words = t.split(/\s+/);
   const isAllKeywords = words.every(w => 
       roomLock.test(w) || 
       /^\d+$/.test(w) || 
-      guestLock.test(w) || 
+      /\b(guest|name|contact|pax|attn|with)\b/i.test(w) || 
       /^[:.-]+$/.test(w) ||
-      w.length < 2 // Ignore single letters like "&"
+      w.length < 2 
   );
 
   return isAllKeywords;
@@ -325,24 +355,28 @@ async function startBot() {
 
     if (!rawText.trim()) return
 
-    // ======================================================
-    // 🧠 REPLY MERGER (Conversational Repair)
-    // ======================================================
+    // 🧠 CONVERSATIONAL REPAIR (Fixed)
     const { getPendingQuestion, clearPendingQuestion } = require('./queryStore');
     const pending = getPendingQuestion(groupId);
     let finalProcessingText = rawText;
 
-    if (pending) {
-        // If the current message is a short answer (like "dbl" or "12-14 feb")
-        // combine it with the original text we saved earlier.
+    // 🛡️ SMART MERGER FIX: 
+    // If the NEW message looks like a full query (has Month + Room), ignore pending questions!
+    const looksLikeNewQuery = 
+        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(rawText) && 
+        extractRoomTypesFromText(rawText).length > 0;
+
+    if (pending && !looksLikeNewQuery) {
         console.log(`🔗 Merger: Found pending ${pending.missing}. Combining...`);
         finalProcessingText = `${pending.originalText}\n${rawText}`;
-        clearPendingQuestion(groupId); // Clear so we don't loop
+        clearPendingQuestion(groupId); 
+    } else if (looksLikeNewQuery) {
+        // User ignored the bot's question and asked something new -> Clear the memory
+        clearPendingQuestion(groupId);
     }
 
     const role = getGroupRole(groupId)
     const type = classifyMessage({ groupRole: role, text: finalProcessingText })
-
     const universalTypes = extractRoomTypesFromText(finalProcessingText);
 
     console.log('\n----------------------------')
@@ -353,29 +387,60 @@ async function startBot() {
     console.log('Text:', finalProcessingText)
 
 if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
-
       // ============================================================
-      // 🛡️ 1. ROBUST PRE-PROCESSING (The "Omni-Reaper")
+      // 🛡️ 1. ROBUST PRE-PROCESSING
       // ============================================================
+      
+// ✅ STEP A: Fix Typos & Normalize
       let preProcessedText = finalProcessingText
-        // A. Fix "DD/DD Month" ranges FIRST (e.g. "01/05 march" -> "01 to 05 march")
+        .replace(/\bcheck\s*inn\b/gi, 'check in') 
+        .replace(/\b(inn|out)\s*:\s*/gi, ' ')     
+        .replace(/\b(guest|name)\s*:\s*/gi, 'guest ')
+        // 🛡️ FIX 4: CHATTER CLEANER (Strips "Salam", "Please", "Need")
+        .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|check|price|prices|amount|cost)\b/gi, ' ')
+        // Fix "1st of March"
+        .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
+        .replace(/(\d+)(st|nd|rd|th)/gi, '$1'); 
+
+      // 🛡️ FIX 41: LAZY DATE MERGER
+      preProcessedText = preProcessedText.replace(
+          /\b(\d{1,2})\s+(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi,
+          '$1 to $2 $3'
+      );
+
+      // 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
+      // Removed "fundaq", "hotel", "tower", "grand" to prevent bad splits.
+      // Only splits on DISTINCT BRANDS.
+      const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|taiba|aram|artal|oberoi)\b/gi;
+      preProcessedText = preProcessedText.replace(brandsRegex, '\n$1');
+
+      // 🛡️ FIX 8: THE EXPLODER
+      preProcessedText = preProcessedText.replace(
+          /(\b\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, 
+          '\n$1 '
+      );
+      preProcessedText = preProcessedText.replace(
+          /(\b\d+\s*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|quint|suite))/gi,
+          '\n$1'
+      );
+
+      // ✅ STEP B: Run the Multi-Line Date Fixer
+      preProcessedText = normalizeMultiLineDateRange(preProcessedText);
+
+      // ✅ STEP C: Standard replacements
+      // ... (Keep the rest of your Step C regexes here exactly as they were) ...
+      preProcessedText = preProcessedText
         .replace(/(\d{1,2})\s*[\/-]\s*(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 to $2 $3')
-        
-        // B. Fix "DD/MM" numeric dates (e.g. "12/2" -> "12 Feb")
         .replace(/\b(\d{1,2})[\/-](\d{1,2})\b/g, (match, d, m) => {
             if (parseInt(m) > 12) return `${d} to ${m}`; 
             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
             return `${d} ${months[parseInt(m)-1]}`;
         })
-        
-        // C. Standardize "DD/MM/YYYY"
         .replace(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/g, (m, d, mth, y) => {
              const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
              return `${d} ${months[parseInt(mth)-1]} ${y}`;
         })
-        
-        // D. Fix Month Order ("Feb 16" -> "16 Feb")
-        .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*(\d{1,2})\b/gi, '$2 $1');
+        .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[ \t]*(\d{1,2})(?!\s*(?:room|bed|pax|guest|dbl|trp|quad|quint))\b/gi, '$2 $1');
 
       let lines = preProcessedText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       let pairedLines = [];
@@ -385,14 +450,23 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           let line = lines[i];
 
           // 🛑 GUARD 1: If line ALREADY has "12 to 15", don't split it!
-          if (/\d+\s*to\s*\d+/i.test(line)) {
+          // 🛡️ FIX: This now properly detects "19 jan to 02 feb" and keeps it whole
+          if (/\d.*\s+(to|-)\s+\d/i.test(line)) {
               if (dateBuffer) { pairedLines.push(dateBuffer); dateBuffer = null; }
               pairedLines.push(line);
               continue;
           }
 
-          // 🛑 GUARD 2: Ignore "Room Count" lines (Fixes the "2 quards" bug)
-          // If line starts with number but is followed by "rooms", "pax", "quad", "dbl", it is NOT a date.
+
+          // 🛡️ FIX 43: PRESERVE "NIGHTS" (The Duration Fix)
+          // This prevents "19 feb for 3 nights" from becoming just "19 feb"
+          if (/\b\d+\s*nights\b/i.test(line)) {
+              if (dateBuffer) { pairedLines.push(dateBuffer); dateBuffer = null; }
+              pairedLines.push(line);
+              continue;
+          }
+
+          // 🛑 GUARD 2: Ignore "Room Count" lines
           if (/^\d+\s*(room|pax|guest|adult|child|quad|quint|trp|trip|dbl|doub|sgl|sing|bed)/i.test(line)) {
               if (dateBuffer) { pairedLines.push(dateBuffer); dateBuffer = null; }
               pairedLines.push(line);
@@ -402,20 +476,18 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           // Keyword Detection
           let isDateLine = /^(?:check\s*in|chk\s*in|arr|from|arriving|check\s*out|chk\s*out|dep|to|in|out|leaving)[:\s-]*(\d.*)/i.exec(line);
           
-          // If no keyword, check if it looks like a pure date "5 mar"
           if (!isDateLine) {
               const pureDate = /^(\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i.exec(line);
-              if (pureDate) isDateLine = [line, pureDate[1]]; // Fake the regex match structure
+              if (pureDate) isDateLine = [line, pureDate[1]]; 
           }
           
           if (isDateLine) {
-              let extractedDate = isDateLine[1] || isDateLine[2]; // Handle both regex groups
+              let extractedDate = isDateLine[1] || isDateLine[2]; 
               extractedDate = extractedDate.trim();
 
               if (!dateBuffer) {
                   dateBuffer = extractedDate; 
               } else {
-                  // Pair found!
                   pairedLines.push(`${dateBuffer} to ${extractedDate}`);
                   dateBuffer = null; 
               }
@@ -428,12 +500,14 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
       // Neighbor Date Fuser (Fallback)
       let stage3Lines = [];
-      const dateOnlyRegex = /^(\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i;
+      const strictMonthRegex = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
 
       for (let i = 0; i < pairedLines.length; i++) {
         let current = pairedLines[i];
         let next = (pairedLines[i+1] || "").trim();
-        if (dateOnlyRegex.test(current) && dateOnlyRegex.test(next) && !current.toLowerCase().includes('to')) {
+        
+        // 🛡️ Only merge if BOTH lines actually contain a month name
+        if (strictMonthRegex.test(current) && strictMonthRegex.test(next) && !current.toLowerCase().includes('to')) {
           stage3Lines.push(`${current} to ${next}`);
           i++;
         } else {
@@ -451,15 +525,16 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           }
       });
 
-      // Final Noise Scrubber
+// Final Noise Scrubber
       let effectiveText = stage4Lines
+        // 🛡️ FIX 9: Don't delete the line! Just remove the noise words.
+        .map(line => line.replace(/saudi arabia|street|road|district|jabal omar|ibrahim al khalil/gi, '')) 
         .filter(line => !/\b\d{5}\b/.test(line)) 
         .filter(line => {
-            const isLong = line.split(' ').length > 15;
-            const hasKey = /check|arr|dep|night|room|bed|guest|leaving|arriving|please|rate/i.test(line);
-            return !isLong || hasKey; 
+             const isLong = line.split(' ').length > 15;
+             const hasKey = /check|arr|dep|night|room|bed|guest|leaving|arriving/i.test(line);
+             return !isLong || hasKey; 
         }) 
-        .filter(line => !/saudi arabia|street|road|district|jabal omar/i.test(line))
         .join('\n')
         .replace(/^(check\s*in|check\s*out|chk|arr|dep|from|to|in|out|arriving|leaving)[:\s-]*/gim, '');
 
@@ -467,58 +542,75 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
       // ============================================================
       // 🛡️ 2. SEGMENTATION & BLOCK FUSING
+// ============================================================
+      // 🛡️ 2. SEGMENTATION & FALLBACKS
       // ============================================================
       let segmentation;
       try {
         segmentation = await segmentClientQuery(effectiveText);
       } catch (err) {
-        for (const owner of getOwnerGroups()) {
-          await sock.sendMessage(owner, { text: `⚠️ Segmentation failed\n${err.message}` });
-        }
-        return;
+        console.log("⚠️ AI Segmentation errored, using fallback block.");
       }
-
-// [Previous Segmentation Code ...]
 
       let { blocks: rawBlocks } = segmentation || {};
       let blocks = [];
-      
-      // BLOCK FUSER
-      if (Array.isArray(rawBlocks)) {
-        rawBlocks.forEach(b => {
-          let last = blocks[blocks.length - 1];
-          const isSameHotel = last && JSON.stringify(last.hotels) === JSON.stringify(b.hotels);
-          if (isSameHotel) {
-            last.dates = (last.dates + '\n' + b.dates).trim();
-          } else {
-            blocks.push({
-              ...b,
-              dates: (b.dates || '').trim(),
-              hotels: Array.isArray(b.hotels) ? b.hotels.map(h => h.trim()).filter(Boolean) : []
-            });
-          }
-        });
+      if (Array.isArray(rawBlocks)) blocks = rawBlocks;
+
+      // 🛡️ SAFETY NET: If AI returned NO blocks, create a default one from text
+      // This fixes cases where AI segmentation fails completely on simple queries
+      if (blocks.length === 0) {
+          console.log("⚠️ No AI blocks. Creating default block from text.");
+          blocks.push({
+              hotels: [],
+              dates: effectiveText // Pass text as dates context for now
+          });
       }
 
-      // 🛡️ CRITICAL FIX: Aggressively filter hotels list
-      // This removes "Quard", "5-10 Mar", "Dbl RO" from the hotel array
+      // Filter invalid hotels from AI blocks
       for (const block of blocks) {
         if (Array.isArray(block.hotels)) {
             block.hotels = block.hotels.filter(h => !isRoomOnlyLine(h));
         }
       }
 
-      // Fallback: If no hotels found, guess from text (but use the STRICT filter)
+// 🛡️ INTELLIGENT SCANNER & RESCUER
+      // 1. Fix Empty Blocks
       for (const block of blocks) {
         if (!Array.isArray(block.hotels) || block.hotels.length === 0) {
-          block.hotels = effectiveText.split('\n')
-            .map(l => l.trim())
-            .filter(Boolean)
-            .filter(l => !isRoomOnlyLine(l)); // <--- Now uses the new stricter logic
+          console.log("🔍 Scanning text for hotels (Empty Block Fallback)...");
+          const candidates = effectiveText.split('\n').map(l => l.trim()).filter(Boolean);
+          block.hotels = candidates.filter(line => !isRoomOnlyLine(line));
         }
       }
 
-      // [Proceed to Global Date Ranges...]
+// 🛡️ 2. RESCUE ORPHAN HOTELS
+      const allDetectedHotels = new Set();
+      blocks.forEach(b => (b.hotels || []).forEach(h => allDetectedHotels.add(h)));
+
+      const textLines = effectiveText.split('\n').map(l => l.trim()).filter(Boolean);
+      const orphanHotels = [];
+      
+      textLines.forEach(line => {
+          if (!isRoomOnlyLine(line) && normalizeHotelForAI(line)) {
+              const alreadyFound = Array.from(allDetectedHotels).some(h => h.includes(line) || line.includes(h));
+              if (!alreadyFound) orphanHotels.push(line);
+          }
+      });
+
+      if (orphanHotels.length > 0) {
+          console.log("⛑️ Rescued Orphan Hotels:", orphanHotels);
+          if (blocks.length > 0) {
+              if (!blocks[0].hotels) blocks[0].hotels = [];
+              blocks[0].hotels.unshift(...orphanHotels); 
+          } else {
+              // 🛡️ FIX 9: Create new block if none exist
+              blocks.push({
+                 hotels: orphanHotels,
+                 dates: effectiveText
+              });
+          }
+      }
+      
       if (blocks.length === 0) {
         for (const owner of getOwnerGroups()) {
           await sock.sendMessage(owner, { text: '⚠️ No valid booking blocks detected' });
@@ -527,9 +619,9 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       }
 
       const parent = createParent({ clientGroupId: groupId, originalMessage: msg });
+      // ... (Code continues to globalHotels extraction)
       const allQueries = [];
       
-      // Global Data Collection
       const globalDateRanges = [];
       const sameMonthRegex = /(\d{1,2})[\s-]*(?:to|[-/]|and)[\s-]*(\d{1,2})[\s-]*([a-z]{3,9})/gi;
       let m;
@@ -547,16 +639,21 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           console.log("🧹 Sanitizing hotels:", globalHotels);
           const cleaned = await sanitizeHotelNames(globalHotels);
           console.log("✅ Result:", cleaned);
-          globalHotels.forEach((raw, i) => { sanitizedMap[raw] = cleaned[i] || raw; });
+          
+          globalHotels.forEach((raw, i) => { 
+              if (cleaned[i]) {
+                  sanitizedMap[raw] = cleaned[i];
+              } else {
+                  console.log(`⚠️ Sanitizer missed "${raw}", using raw value.`);
+                  sanitizedMap[raw] = raw; 
+              }
+          });
       }
       
       let lastKnownHotels = []; 
 
-      // 🕵️ Conversational Repair
-// 🕵️ CONVERSATIONAL REPAIR
+      // 🕵️ CONVERSATIONAL REPAIR
       const hasDate = /(\d{1,2})\s*(?:to|-)?\s*(\d{1,2})?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText);
-      
-      // 🛡️ FIX: Added 'quard', 'tripple', 'qad', 'prsn' to the whitelist
       const hasRoom = /\b(sgl|single|dbl|double|tw|twin|trp|triple|tripple|quad|quard|qad|quint|pax|bed|room|guest|person|prsn|ppl)s?\b/i.test(effectiveText);
       
       if (!hasRoom && hasDate) {
@@ -572,7 +669,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       clearPendingQuestion(groupId);
 
       // ============================================================
-      // 🛡️ 3. MAIN PROCESSING LOOP (WITH SAFETY BREAKER)
+      // 🛡️ 3. MAIN PROCESSING LOOP
       // ============================================================
       let requestCount = 0;
       let limitReached = false;
@@ -593,7 +690,6 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
         let blockDateList = [];
         if (block.dates) {
-          // Re-clean dates
           const rawLines = block.dates.split('\n').map(l => l.trim()).filter(Boolean);
           const cleanLines = rawLines.map(l => l.replace(/^(check\s*[-]?\s*(in|out|inn|date)|arr|dep|arrival|departure|from|to)[:\s-]*/i, '').trim());
           
@@ -602,7 +698,6 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             const currentClean = cleanLines[i];
             const nextClean = cleanLines[i+1];
             
-            // Basic merging logic for already blocked dates
             if (isPureDateLine(currentClean) && isPureDateLine(nextClean) && !currentClean.includes('to')) {
               mergedDates.push(`${currentClean} to ${nextClean}`);
               i++; 
@@ -626,7 +721,9 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         
         if (splitHotels.length > LIMITS.MAX_HOTELS) splitHotels = splitHotels.slice(0, LIMITS.MAX_HOTELS);
         
-        const sanitizedHotels = splitHotels.map(h => sanitizedMap[h] || h);
+        // 🛡️ DEDUPLICATION FIX: Ensure we don't process same sanitized hotel twice
+        let sanitizedHotels = splitHotels.map(h => sanitizedMap[h] || h);
+        sanitizedHotels = [...new Set(sanitizedHotels)];
 
         const isAgain = rawText.toUpperCase().includes('AGAIN') || rawText.toUpperCase().includes('SAME');
         if ((splitHotels.length === 0 || (splitHotels.length === 1 && /AGAIN|SAME/i.test(splitHotels[0]))) && isAgain) {
@@ -642,7 +739,6 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           const hotel = normalizeHotelForAI(hotelName);
           if (!hotel) continue;
 
-          // 👑 ROOM TYPE LOGIC
           const fullLine = effectiveText.split('\n').find(l => l.toLowerCase().includes(hotelName.toLowerCase())) || hotelName;
           let activeTypes = extractRoomTypesFromText(fullLine);
           if (activeTypes.length === 0) activeTypes = universalTypes;
@@ -652,16 +748,36 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           const mealHint = extractMeal(effectiveText);
           const viewHint = extractView(effectiveText);
 
+          // 🛡️ FIX: Combine Block Dates + Global Dates
+          // This ensures the AI sees "20 Feb - 01 Mar" even if the segmenter put Kiswa in the wrong block.
+// 🛡️ FIX: Combine Block Dates + Global Dates
+          const allContextDates = [...new Set([...blockDateList, ...globalDateRanges])];
+
+
+          // 🛡️ SMART CONTEXT PROMPT
           const aiInput = protectDoubleTreeHotel([
-              `HOTEL: ${hotel}`,
-              `DATES_DATA: ${blockDateList.join('\n')}`, 
-              `CONTEXT: ${effectiveText}`, 
-              `ROOMS: ${activeTypes.join(' ')}`,
+              `TARGET_HOTEL: ${hotel}`,
+              `AVAILABLE_DATES: ${allContextDates.join(', ')}`, 
+              `FULL_MESSAGE_CONTEXT: ${effectiveText}`, 
+              `DEFAULT_ROOMS: ${activeTypes.join(' ')}`,
               `MEAL_HINT: ${mealHint}`,
               `VIEW_HINT: ${viewHint}`,
-              `STRICT: Extract all stays. "2 dbl" means rooms: 2. "2 rooms 8 pax" means rooms: 2.`
+              
+              `--- LOGIC RULES ---`,
+              `1. GRAVITY RULE: The date usually appears BELOW the hotel name.`,
+              `   - Format: [Hotel A] ... [Hotel B] ... [Date 1] ... [Hotel C] ... [Date 2]`,
+              `   - Interpretation: Hotel A & B get [Date 1]. Hotel C gets [Date 2].`,
+              `2. BARRIER RULE (CRITICAL): A date line acts as a WALL.`,
+              `   - Any hotel appearing AFTER "Date 1" CANNOT be assigned "Date 1". It must wait for "Date 2".`,
+              `   - Example: "Anwar \\n 18-20 Feb \\n Kiswa \\n 20-01 Mar"`,
+              `   - "Kiswa" is AFTER "18-20 Feb", so it MUST take "20-01 Mar".`,
+              `3. LAZY DATES: "15 20 mar" means "15 Mar to 20 Mar".`,
+              `4. NIGHTS CALCULATION: "3 nights" starting "19 Feb" -> Check-out 22 Feb.`,
+              `5. EXTRACT PAX: "6 person" -> "persons": 6.`,
+              `6. STRICT VIEW: DO NOT infer views unless EXPLICITLY written.`,
+              `STRICT: Return JSON only.`
           ].join('\n'));
-
+          
           let ai;
           try { 
               ai = await parseClientMessageWithAI(aiInput); 
@@ -677,21 +793,41 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
               const q = { ...qRaw };
               if (!normalizeHotelForAI(q.hotel)) q.hotel = hotel;
 
-              // NaN Repair
+              
+
               if (q.check_out && q.check_out.includes('NaN')) {
                  const low = effectiveText.toLowerCase();
                  if (low.includes('apri')) q.check_out = q.check_out.replace(/-NaN-/, '-04-');
                  if (low.includes('marc')) q.check_out = q.check_out.replace(/-NaN-/, '-03-');
                  if (low.includes('feb')) q.check_out = q.check_out.replace(/-NaN-/, '-02-');
               }
-              
-              const cIn = new Date(q.check_in);
-              const cOut = new Date(q.check_out);
-              if (isNaN(cIn.getTime()) || isNaN(cOut.getTime())) continue;
 
-              if (q.check_in === q.check_out && !rawText.toLowerCase().includes('1 night')) continue;
-              if (q.confidence === 0) continue;
+              // 🛡️ FIX: Remove Ordinals (st, nd, rd, th) before parsing date
+              // "1st March" -> "1 March"
+              if (q.check_in) q.check_in = q.check_in.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+              if (q.check_out) q.check_out = q.check_out.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
               
+const cIn = new Date(q.check_in);
+              const cOut = new Date(q.check_out);
+              
+              if (isNaN(cIn.getTime()) || isNaN(cOut.getTime())) {
+                  console.log("⚠️ Invalid Date from AI:", q.check_in, q.check_out);
+                  continue;
+              }
+
+              // 🛡️ FIX: Ambiguous 1-Night Guard (RELAXED)
+              // We ALLOW single dates if the user specified a Room Type (e.g. "2 quad")
+              const duration = (cOut - cIn) / (1000 * 60 * 60 * 24);
+              const hasExplicitRooms = /\b(dbl|double|trp|triple|quad|quint|suite|bed|room|pax)\b/i.test(effectiveText);
+              
+              if (duration <= 1 && !rawText.toLowerCase().includes('night') && !hasExplicitRooms) {
+                  console.log("⚠️ Ambiguous 1-night stay (No room info). Skipping.");
+                  continue;
+              }
+
+              if (q.check_in === q.check_out) continue; // Basic sanity check
+              // ... (Continue with confidence check and rest of loop) ...              
+              if (q.confidence === 0) continue;
               if (!q.meal && mealHint) q.meal = mealHint;
               if (!q.view && viewHint) q.view = viewHint;
               
@@ -708,15 +844,10 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
                   else q.room_type = match;
               }
 
-              // 👑 ROOM TYPE FORMATTER 👑
-              // Logic: Only show "(X Pax)" if it is a Suite or large unit. 
-              // "2 Quad" remains "2 Quad". "1 Suite" becomes "1 Suite (6 Pax)".
               if (typeof q.persons === 'number' && q.persons >= 1) {
                   const isVariableCapacity = /SUITE|STUDIO|APARTMENT|VILLA|CHALET|FAMILY/i.test(q.room_type);
-                  
                   if (isVariableCapacity) {
                       const paxLabel = `(${q.persons} Pax)`;
-                      // Prevent duplicate labels if AI already added it
                       if (!q.room_type.toUpperCase().includes('PAX')) {
                           q.room_type = `${q.room_type} ${paxLabel}`;
                       }
@@ -730,9 +861,12 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
                   requestCount++;
               }
           }
-        } 
+       } 
       }
-
+      
+      // ... (Rest of the standard V1 sending logic & V2 shadow mode logic remains identical)
+      // I am keeping the bottom half standard as requested.
+      
       if (limitReached) {
           for (const owner of getOwnerGroups()) {
               await sock.sendMessage(owner, { 
@@ -748,13 +882,38 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return;
       }
 
-      const seen = new Set();
-      const finalQueries = allQueries.filter(q => {
-        const k = `${q.hotel}|${q.check_in}|${q.check_out}|${q.rooms}|${q.room_type}|${q.view}|${q.meal}`;
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
+// 🛡️ FINAL DEDUPLICATION (Fixes "Hilton" vs "Hilton Makkah")
+// ============================================================
+      // 🛡️ 4. FINAL DEDUPLICATION (The "Simple Rule")
+      // ============================================================
+      // Rule: SAME HOTEL & SAME DATES & SAME ROOM TYPE -> NEVER REPEAT
+      
+      const uniqueQueries = [];
+      const seenSignatures = new Set();
+
+      for (const q of allQueries) {
+          // 1. Normalize Hotel Name for Comparison ONLY
+          // This ensures "Kiswa" and "Kiswa Towers" count as the SAME hotel.
+          const cleanName = (sanitizedMap[q.hotel] || q.hotel).toLowerCase()
+              .replace(/\b(makkah|madinah|hotel|hotels|convention|towers|tower|jabal|omar|al|residence|suites|inn|view|guest|house)\b/gi, '')
+              .replace(/[^a-z0-9]/g, '') // Remove symbols
+              .trim();
+
+          // 2. Create the Signature
+          // format: "kiswa|2026-02-18|2026-02-20|quad"
+          const signature = `${cleanName}|${q.check_in}|${q.check_out}|${q.room_type}`;
+
+          // 3. Check & Push
+          if (!seenSignatures.has(signature)) {
+              seenSignatures.add(signature);
+              uniqueQueries.push(q);
+          } else {
+              console.log(`🗑️ Duplicate Removed: ${q.hotel} (${q.check_in}) - Signature matched.`);
+          }
+      }
+      
+      // Update the main list to use the unique ones
+      const finalQueries = uniqueQueries;
 
       const queriesWithRates = [];
       const queriesForVendors = [];
@@ -800,50 +959,72 @@ ${mealViewLine}
 if (queriesForVendors.length > 0) {
           await sock.sendMessage(groupId, { text: 'checking' }, { quoted: msg });
 
-          // 🧠 INTELLIGENT VENDOR LOCKING 🧠
-          // We decide WHICH vendors get the job BEFORE we loop through the dates.
-          // This ensures Vendor A gets ALL dates, instead of Date 1 going to A and Date 2 to B.
+          // 🧠 INTELLIGENT DISTRIBUTION LOGIC (1 Query Per Vendor Per Date Range)
           
-          const uniqueHotels = [...new Set(queriesForVendors.map(q => q.hotel))];
-          const vendorSessionMap = {}; // Stores { "Voco": [VendorA, VendorB] }
-
-          for (const hotel of uniqueHotels) {
-              let allVendors = getVendorsForHotel(hotel);
-              
-              // 🛡️ Apply Vendor Limit
-              // If we have 5 vendors but limit is 2, we only pick the first 2.
-              // (Future upgrade: Rotate these or pick random to be fair)
-              if (allVendors.length > LIMITS.MAX_VENDORS_PER_HOTEL) {
-                  allVendors = allVendors.slice(0, LIMITS.MAX_VENDORS_PER_HOTEL);
-              }
-              
-              vendorSessionMap[hotel] = allVendors;
-          }
-
-          // 🚀 EXECUTION LOOP
+          // 1. Group Queries by Date Range
+          // Key: "2026-02-18|2026-02-20", Value: [Query Objects]
+          const queriesByDate = {};
           for (const q of queriesForVendors) {
-              const child = createChild({ parentId: parent.id, parsed: q });
-              
-              // Retrieve the LOCKED vendors for this hotel
-              const targetVendors = vendorSessionMap[q.hotel] || [];
+              const key = `${q.check_in}|${q.check_out}`;
+              if (!queriesByDate[key]) queriesByDate[key] = [];
+              queriesByDate[key].push(q);
+          }
 
-              if (targetVendors.length > 0) {
-                  console.log(`📤 Sending ${q.hotel} (${q.check_in}) to LOCKED set:`, targetVendors);
+          // 2. Process each Date Range independently
+          for (const [dateKey, queries] of Object.entries(queriesByDate)) {
+              
+              const usedVendorsForThisDate = new Set(); // 🔒 Locks vendors for this specific date range
+              const uniqueHotels = [...new Set(queries.map(q => q.hotel))];
+              
+              // 3. SCARCITY SORT: Process hotels with FEWER vendors first!
+              // This prevents a "popular" vendor from taking a job that only they could do elsewhere.
+              const hotelOps = uniqueHotels.map(hotel => {
+                  return { 
+                      hotel, 
+                      vendors: getVendorsForHotel(hotel) 
+                  };
+              }).sort((a, b) => a.vendors.length - b.vendors.length);
+
+              // 4. Assign Vendors
+              for (const op of hotelOps) {
+                  const { hotel, vendors } = op;
                   
-                  for (const vg of targetVendors) {
-                      const sent = await sock.sendMessage(vg, { text: formatQueryForVendor(child) });
-                      if (sent?.key?.id) linkVendorMessage(child.id, sent.key.id);
-                      await sleep(VENDOR_SEND_DELAY_MS);
+                  // Find relevant query for this hotel (to create child)
+                  const relevantQuery = queries.find(q => q.hotel === hotel);
+                  if (!relevantQuery) continue;
+
+                  // Filter: Only pick vendors who haven't been used for this Date Range yet
+                  const availableVendors = vendors.filter(v => !usedVendorsForThisDate.has(v));
+                  
+                  // Limit: Respect global limit (e.g. max 2 vendors per hotel), but primarily fresh ones
+                  const selectedVendors = availableVendors.slice(0, LIMITS.MAX_VENDORS_PER_HOTEL);
+
+                  if (selectedVendors.length > 0) {
+                      console.log(`📤 Sending ${hotel} (${relevantQuery.check_in}) to:`, selectedVendors);
+                      
+                      const child = createChild({ parentId: parent.id, parsed: relevantQuery });
+                      
+                      for (const vg of selectedVendors) {
+                          const sent = await sock.sendMessage(vg, { text: formatQueryForVendor(child) });
+                          if (sent?.key?.id) linkVendorMessage(child.id, sent.key.id);
+                          
+                          // 🔒 LOCK THIS VENDOR
+                          usedVendorsForThisDate.add(vg); 
+                          
+                          await sleep(VENDOR_SEND_DELAY_MS);
+                      }
+                  } else {
+                      console.log(`⚠️ Skipped ${hotel} (${relevantQuery.check_in}): All capable vendors already booked for these dates.`);
                   }
-              } else {
-                  console.log(`⚠️ No vendors found for ${q.hotel}`);
               }
           }
+        }
       }
-  }    
-if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
+    // ======================================================
+    // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
+    // ======================================================
+    if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
       
-      // 1. Context Matching (Find who this reply belongs to)
       let child = null;
       const ctx = msg.message.extendedTextMessage?.contextInfo;
       if (ctx?.stanzaId) child = getChildByVendorMessage(ctx.stanzaId);
@@ -854,47 +1035,32 @@ if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
           return;
       }
 
-      // ====================================================
-      // 🧪 V2 SHADOW MODE (Active Testing)
-      // ====================================================
       try {
-          console.log(`🧪 V2: Calculation started for ${child.hotel}...`);
+          const queryData = child.parsed || child; 
+          console.log(`🧪 V2: Calculation started for ${queryData.hotel}...`);
           
-// 🛡️ DATA UNPACKING: Handle structure { id: '...', parsed: { hotel: '...' } }
-      const queryData = child.parsed || child; 
-
-      console.log(`🧪 V2: Calculation started for ${queryData.hotel}...`);
-      
-      // Step A: Run the AI Parser & Calculator
-      const v2Quote = await calculateQuote(queryData, rawText);
+          const v2Quote = await calculateQuote(queryData, rawText);
           
           if (v2Quote) {
-              // Step B: Format the "Secret Report"
               const report = formatForOwner(v2Quote);
               
-              // Step C: Send to ALL Owner Groups
               const owners = getOwnerGroups();
               for (const ownerGroupId of owners) {
                   await sock.sendMessage(ownerGroupId, { text: report });
               }
               console.log("✅ V2 Shadow Report sent to Owners");
-              
-              // 🛑 STOP HERE: Do not send anything to the client yet.
-              // We want to verify the math in the owner group first.
               return; 
 
           } else {
-              console.log("❌ V2: AI determined this is not a quote (chit-chat or unclear).");
+              console.log("❌ V2: AI determined this is not a quote.");
           }
       } catch (err) {
           console.error("⚠️ V2 Critical Error:", err);
-          // If V2 crashes, we log it and do nothing (Safe Fail)
       }
       
-      return; // Ensure no V1 logic runs accidentally during this test phase
+      return; 
     }
   })
-
   sock.ev.on('connection.update', ({ connection }) => {
     if (connection === 'close') {
       console.log('❌ Connection closed, restarting...')
