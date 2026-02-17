@@ -92,11 +92,16 @@ function extractRoomTypesFromText(text = '') {
   });
 
   // 3. 🏠 STANDARD TYPES & SHORTHAND (Fallback + PLURAL SUPPORT 'S')
+// 3. 🏠 STANDARD TYPES & SHORTHAND (Fallback + PLURAL SUPPORT 'S')
   // Added (?:S?) to handle "SINGLES", "DOUBLES", "TRIPLES", "QUADS"
   if (/\bSINGLE(?:S?)\b/i.test(t)) types.push('SINGLE');
   if (/\b(DBL|DOUBLE|DUBLE|TWIN)(?:S?)\b/i.test(t)) types.push('DOUBLE');
   if (/\b(TPL|TRP|TRIPLE|TRIPPLE|TRIPAL)(?:S?)\b/i.test(t)) types.push('TRIPLE'); 
-  if (/\b(QUAD|QUARD|QAD|QUADR|QD)(?:S?)\b/i.test(t)) types.push('QUAD'); 
+  
+  // 🛡️ FIX: Removed double pipe "||" which caused "Ghost Quad" bug
+  // Was: QD||QUED (Matched empty string) -> Now: QD|QUED
+  if (/\b(QUAD|QUARD|QAD|QUADR|QD|QUED)(?:S?)\b/i.test(t)) types.push('QUAD'); 
+  
   if (/\b(QUINT|QUINTU|QUINTUPLE)(?:S?)\b/i.test(t)) types.push('QUINT');
   
   if (/\b(SUITE|ROOM|BED)(?:S?)\b/i.test(t)) {
@@ -154,7 +159,11 @@ function normalizeMultiLineDateRange(text = '') {
 function extractMeal(text = '') {
   const t = text.toUpperCase();
   
-  // 🌙 RAMADAN MEALS (Sehri / Iftar)
+// 🌙 RAMADAN MEALS (Combo First!)
+  if (/\b(SUHOOR|SEHRI).+(IFTAR|AFTARI)\b/.test(t) || /\b(IFTAR|AFTARI).+(SUHOOR|SEHRI)\b/.test(t)) {
+      return 'SUHOOR + IFTAR';
+  }
+
   // Handles: Suhoor, Sehri, Sahri, Iftar, Iftari, Aftari
   if (/\b(SUHOOR|SUHUR|SEHRI|SAHRI|SEHRY)\b/.test(t)) return 'SUHOOR';
   if (/\b(IFTAR|IFTARI|AFTARI|IFTAAR)\b/.test(t)) return 'IFTAR';
@@ -189,7 +198,10 @@ function extractView(text = '') {
 }
 
 // 🛠️ HELPER: DATE FORMATTING
-function formatDateRange(checkIn, checkOut) {
+// 🛠️ HELPER: DATE FORMATTING
+function formatDateRange(checkIn, checkOut, label = null) {
+    if (label) return label; // 👑 Return special label if exists (e.g. "LAST ASHRA")
+
     try {
         const d1 = new Date(checkIn);
         const d2 = new Date(checkOut);
@@ -227,12 +239,18 @@ function isRoomOnlyLine(line = '') {
   if (!t) return true;
 
   // 🛡️ 0. WHITELIST: If it has a Hotel Brand, it is VALID (Return false to keep it)
-  const hotelBrands = /\b(hilton|swiss|marriot|Marriott|voco|pullman|anwar|saja|kiswa|tower|hotel|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|ghufran|shaza|millennium|copthorne|taiba|front|aram|artal|zn|fundaq|grand|oberoi)\b/i;
+  // (Your existing list handles hidayah/miramar/etc)
+  const hotelBrands = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|tower|hotel|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|ghufran|shaza|millennium|copthorne|taiba|front|aram|artal|zn|fundaq|grand|oberoi|miramar|hidayah|hidaya|manar|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/i;
+  
+  // 🚨 CRITICAL FIX: "LAST ASHRA" is a DATE, NEVER a hotel.
+  // We check this BEFORE the whitelist so Emaar doesn't save it.
+  if (/last\s*ashra|ramadan/i.test(t)) return true;
+
   if (hotelBrands.test(t)) return false;
 
   // 🛡️ 1. NUMBER START GUARD (Fixes "1 dbl with extra bed")
-  // If line starts with a number AND contains room/bed/pax keywords -> REJECT IT.
-  if (/^\d/.test(t) && /\b(dbl|double|trp|triple|quad|quint|bed|pax|room|guest|night|sharing)\b/i.test(t)) {
+  // Added: qued
+    if (/^\d/.test(t) && /\b(dbl|double|trp|triple|quad|qued|quint|bed|pax|room|guest|night|sharing|person|persons)\b/i.test(t)) {
       return true;
   }
 
@@ -241,8 +259,11 @@ function isRoomOnlyLine(line = '') {
   if (/check\s*(in|out)|arr|dep|from|to/i.test(t)) return true;
 
   // 3. KEYWORD DICTIONARY
-  const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|bed|beds|view|veiw|vew|city|haram|kaaba|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
-  
+  // Added: qued
+  // 3. KEYWORD DICTIONARY
+  // Added: person (singular)
+  const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|person|bed|beds|view|veiw|vew|city|haram|kaaba|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
+
   if (t.split(/\s+/).length === 1 && roomLock.test(t)) return true;
 
   const words = t.split(/\s+/);
@@ -266,6 +287,9 @@ function isPureDateLine(text = '') {
     .trim();
 
   if (!t) return false;
+  
+  // 🛡️ SPECIAL DATE: LAST ASHRA
+  if (/last\s*ashra/i.test(t)) return true;
 
   // Supports "9th Apri", "25th March", "5 mar", "10 Marc"
   const datePattern = /^\d{1,2}(?:st|nd|rd|th)?[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i;
@@ -279,14 +303,17 @@ function normalizeHotelForAI(hotel = '') {
   let h = hotel.trim();
   if (!h || h.toLowerCase() === 'similar') return null;
 
-  // 🛡️ NEW: Address & Zip Code Guard
-  // Rejects lines like "Makkah 21955" or "Ibrahim Al Khalil"
-  if (/\b\d{5}\b/.test(h)) return null; // Blocks 5-digit zip codes
+// 🛡️ FIX: Address & Zip Code Cleaner (Don't delete the whole line!)
+  // Old: if (/\b\d{5}\b/.test(h)) return null;
+  // New: Remove the zip code, keep the hotel.
+  h = h.replace(/\b\d{5}\b/g, '').trim(); 
+  
+  // Clean address parts
   if (/^(makkah|madinah|saudi arabia|street|road|district|jabal omar ibrahim al khalil)$/i.test(h)) return null;
 
   // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
-  // Added 'nights' and 'date' to prevent "Nights: 6" or "Check-in Date" issues
-  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date)\b/i;
+  // Added: ashra
+  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra)\b/i;
   if (badPatterns.test(h)) return null;
 
   // 🛡️ 2. DATE & NUMBER BLOCKER
@@ -297,13 +324,16 @@ function normalizeHotelForAI(hotel = '') {
 
   // 🛡️ 3. BRAND PROTECTION
   h = h.replace(/\b(double|dbl)\s*tree\b/gi, 'DoubleTree');
-  h = h.replace(/\b(fundaq|fudnaq)\b/gi, 'Fundaq');
+  h = h.replace(/\b(fundaq|fudnaq)\b/gi, '');
 
   // 🛡️ 4. HOTEL KEYWORD LIST
-  const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar)\b/i;
-
+  // Added: hidayah (variations), concord, vision, jiwar, wahba, shourfah, etc.
+  // 🛡️ 4. HOTEL KEYWORD LIST
+  // Added: hidayah (variations), miramar, ruve, nozol, etc.
+  const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
   // 🛡️ NOISE CLEANER
-  h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|quard|room|only|bed|breakfast|bb|ro)\b/gi, '').trim();
+// Added: qued
+  h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|room|only|bed|breakfast|bb|ro)\b/gi, '').trim();
 
   const words = h.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
@@ -390,17 +420,33 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       // ============================================================
       // 🛡️ 1. ROBUST PRE-PROCESSING
       // ============================================================
-      
-// ✅ STEP A: Fix Typos & Normalize
+    // ✅ STEP A: Fix Typos & Normalize
       let preProcessedText = finalProcessingText
         .replace(/\bcheck\s*inn\b/gi, 'check in') 
         .replace(/\b(inn|out)\s*:\s*/gi, ' ')     
         .replace(/\b(guest|name)\s*:\s*/gi, 'guest ')
-        // 🛡️ FIX 4: CHATTER CLEANER (Strips "Salam", "Please", "Need")
+// 🛡️ FIX 4: CHATTER CLEANER
         .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|check|price|prices|amount|cost)\b/gi, ' ')
-        // Fix "1st of March"
+        
+        // 🛡️ FIX: KILL ZIP CODES (Prevents "Swiss 21955" from being deleted later)
+        .replace(/\b\d{5}\b/g, ' ') 
+        
+        // 🛡️ FIX: KILL GENERIC TERMS (Prevents "Fundaq" from being seen as a hotel)
+        .replace(/\b(fundaq|fudnaq)\b/gi, ' ')
+                // Fix "1st of March"
+        // Standardize to "LAST ASHRA" so the AI recognizes it easily
+        .replace(/\b(last\s*ashra|last\s*10\s*days\s*of\s*ramadan|last\s*ashrah)\b/gi, 'LAST ASHRA')
         .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
-        .replace(/(\d+)(st|nd|rd|th)/gi, '$1'); 
+        .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
+
+        // 🛡️ FIX 26: HYPHEN DATE NORMALIZER
+        .replace(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-]*(\d{2})\b/gi, '$1 $2 20$3')
+        .replace(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-]*(\d{4})\b/gi, '$1 $2 $3')
+
+        // 🛡️ FIX 26-B: YEAR-ROOM SEPARATOR (Critical)
+        // Turns "2026 TRIPLE" -> "2026 \n TRIPLE"
+        // Prevents "2026" from being read as the room count.
+        .replace(/\b(202[5-9])\s+(triple|quad|double|single|quint|room|bed|pax)/gi, '$1\n$2');
 
       // 🛡️ FIX 41: LAZY DATE MERGER
       preProcessedText = preProcessedText.replace(
@@ -408,19 +454,18 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           '$1 to $2 $3'
       );
 
-      // 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
-      // Removed "fundaq", "hotel", "tower", "grand" to prevent bad splits.
-      // Only splits on DISTINCT BRANDS.
-      const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|taiba|aram|artal|oberoi)\b/gi;
+// 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
+      // REMOVED: manar, madinah, khalil (to protect "Emaar Al Manar", "Anwar Madinah")
+      // KEPT: hidayah, miramar, concord, vision (Stand-alone names)
+      const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|taiba|aram|artal|oberoi|miramar|hidayah|hidaya|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/gi;
       preProcessedText = preProcessedText.replace(brandsRegex, '\n$1');
-
-      // 🛡️ FIX 8: THE EXPLODER
-      preProcessedText = preProcessedText.replace(
-          /(\b\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, 
+// 🛡️ FIX 8: THE EXPLODER
+        preProcessedText = preProcessedText.replace(
+          /(?<!\bto\s*)(?<!-\s*)(?<!\bfrom\s*)(\b\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, 
           '\n$1 '
       );
-      preProcessedText = preProcessedText.replace(
-          /(\b\d+\s*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|quint|suite))/gi,
+        preProcessedText = preProcessedText.replace(
+          /(\b\d+\s*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|qued|quint|suite))/gi,
           '\n$1'
       );
 
@@ -653,8 +698,13 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       let lastKnownHotels = []; 
 
       // 🕵️ CONVERSATIONAL REPAIR
-      const hasDate = /(\d{1,2})\s*(?:to|-)?\s*(\d{1,2})?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText);
-      const hasRoom = /\b(sgl|single|dbl|double|tw|twin|trp|triple|tripple|quad|quard|qad|quint|pax|bed|room|guest|person|prsn|ppl)s?\b/i.test(effectiveText);
+      // 🛡️ FIX: Added "last ashra" and "ramadan" to the date check
+// 🕵️ CONVERSATIONAL REPAIR
+      const hasDate = /(\d{1,2})\s*(?:to|-)?\s*(\d{1,2})?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText) || 
+                      /last\s*ashra|ramadan/i.test(effectiveText);
+
+      // 🛡️ FIX: Added SUITE, STUDIO, FAMILY to room detection
+      const hasRoom = /\b(sgl|single|dbl|double|tw|twin|trp|triple|tripple|quad|quard|qad|qued|quint|pax|bed|room|guest|person|prsn|ppl|suite|studio|family)s?\b/i.test(effectiveText);
       
       if (!hasRoom && hasDate) {
           setPendingQuestion(groupId, { originalText: effectiveText, missing: 'ROOM' });
@@ -754,7 +804,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           const allContextDates = [...new Set([...blockDateList, ...globalDateRanges])];
 
 
-          // 🛡️ SMART CONTEXT PROMPT
+// 🛡️ SMART CONTEXT PROMPT
           const aiInput = protectDoubleTreeHotel([
               `TARGET_HOTEL: ${hotel}`,
               `AVAILABLE_DATES: ${allContextDates.join(', ')}`, 
@@ -764,13 +814,10 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
               `VIEW_HINT: ${viewHint}`,
               
               `--- LOGIC RULES ---`,
-              `1. GRAVITY RULE: The date usually appears BELOW the hotel name.`,
-              `   - Format: [Hotel A] ... [Hotel B] ... [Date 1] ... [Hotel C] ... [Date 2]`,
-              `   - Interpretation: Hotel A & B get [Date 1]. Hotel C gets [Date 2].`,
-              `2. BARRIER RULE (CRITICAL): A date line acts as a WALL.`,
-              `   - Any hotel appearing AFTER "Date 1" CANNOT be assigned "Date 1". It must wait for "Date 2".`,
-              `   - Example: "Anwar \\n 18-20 Feb \\n Kiswa \\n 20-01 Mar"`,
-              `   - "Kiswa" is AFTER "18-20 Feb", so it MUST take "20-01 Mar".`,
+              `1. GRAVITY RULE: Dates usually appear BELOW the hotel name.`,
+              `   - Exception: If a date is at the very TOP (Header), it applies to all hotels below it until a new date appears.`,
+              `2. BARRIER RULE: A date line acts as a WALL.`,
+              `   - "Hotel A... Date 1... Hotel B" -> Hotel B CANNOT take Date 1. It must find a date below it.`,
               `3. LAZY DATES: "15 20 mar" means "15 Mar to 20 Mar".`,
               `4. NIGHTS CALCULATION: "3 nights" starting "19 Feb" -> Check-out 22 Feb.`,
               `5. EXTRACT PAX: "6 person" -> "persons": 6.`,
@@ -802,12 +849,45 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
                  if (low.includes('feb')) q.check_out = q.check_out.replace(/-NaN-/, '-02-');
               }
 
-              // 🛡️ FIX: Remove Ordinals (st, nd, rd, th) before parsing date
-              // "1st March" -> "1 March"
+            // 🛡️ FIX: Remove Ordinals (st, nd, rd, th) before parsing date
               if (q.check_in) q.check_in = q.check_in.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
               if (q.check_out) q.check_out = q.check_out.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+
+              // 🛡️ SPECIAL DATE MAPPING: LAST ASHRA
+              // Ramadan 2026 is approx Feb 17 - Mar 18.
+              // Last Ashra is approx Mar 09 - Mar 19.
               
-const cIn = new Date(q.check_in);
+// 🛡️ SPECIAL DATE MAPPING: LAST ASHRA
+              // Ramadan 2026 is approx Feb 17 - Mar 18.
+              // Last Ashra is approx Mar 09 - Mar 19.
+              
+// 🛡️ SPECIAL DATE MAPPING: LAST ASHRA
+              const isLastAshraRequest = /LAST\s*ASHRA/i.test(q.check_in) || /LAST\s*ASHRA/i.test(effectiveText);
+
+              if (isLastAshraRequest) {
+                   const userTypedSpecificDate = /(\d{1,2}\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))|(\d{1,2}[\/-]\d{1,2})/i.test(effectiveText);
+                   if (!userTypedSpecificDate || /LAST/i.test(q.check_in)) {
+                       q.check_in = "2026-03-09"; 
+                       q.check_out = "2026-03-19";
+                       q.dateLabel = "LAST ASHRA"; 
+                   }
+              }
+
+              // 🛡️ FIX: STRICT DATE VALIDATION (Anti-Hallucination)
+              // If the AI gives us a date, BUT the user's text contains NO digits and NO date keywords...
+              // Then the AI is hallucinating. KILL THE DATE.
+              const hasRealDateInText = 
+                  /\d/.test(effectiveText) || // Has numbers
+                  /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText) || // Has months
+                  /last\s*ashra|ramadan|today|tomorrow|tonight/i.test(effectiveText); // Has keywords
+
+              if (q.check_in && !hasRealDateInText) {
+                  console.log(`⛔ Hallucination Detected: AI invented date ${q.check_in} but text has no dates. Dropping.`);
+                  q.check_in = null;
+                  q.check_out = null;
+              }
+
+              const cIn = new Date(q.check_in);
               const cOut = new Date(q.check_out);
               
               if (isNaN(cIn.getTime()) || isNaN(cOut.getTime())) {
@@ -825,14 +905,25 @@ const cIn = new Date(q.check_in);
                   continue;
               }
 
-              if (q.check_in === q.check_out) continue; // Basic sanity check
-              // ... (Continue with confidence check and rest of loop) ...              
+if (q.check_in === q.check_out) continue; // Basic sanity check
+              
               if (q.confidence === 0) continue;
+              
+              // Apply Global Hints if missing
               if (!q.meal && mealHint) q.meal = mealHint;
               if (!q.view && viewHint) q.view = viewHint;
               
-              const explicitRoomCount = (effectiveText.match(/(\d+)\s*(?:room|dbl|double|quad|trip|trp)/i) || [])[1];
-              if (explicitRoomCount && q.rooms === 1) q.rooms = parseInt(explicitRoomCount);
+              // 🛡️ FIX 26-B: Room Count Sanity Cap
+              // Ignore numbers > 50 (Prevents years like "2026" being treated as room count)
+              // Old code: const explicitRoomCount = ...
+              const rawCountMatch = effectiveText.match(/(\d+)\s*(?:room|dbl|double|quad|trip|trp|quint)/i);
+              if (rawCountMatch) {
+                  const val = parseInt(rawCountMatch[1], 10);
+                  // Only update if room count is realistic (e.g. less than 50) AND current count is 1
+                  if (!isNaN(val) && val < 50 && q.rooms === 1) {
+                      q.rooms = val;
+                  }
+              }
 
               if (activeTypes.length > 0) {
                   let match = activeTypes.find(t => q.room_type.toUpperCase().includes(t) || t.includes(q.room_type.toUpperCase()));
@@ -853,8 +944,17 @@ const cIn = new Date(q.check_in);
                       }
                   }
               }
-              
+
               if (!q.rooms || q.rooms < 1) q.rooms = 1;
+
+              // 🛡️ FIX: Expand AI Abbreviations
+              if (q.meal === 'IF') q.meal = 'IFTAR';
+              if (q.meal === 'SU') q.meal = 'SUHOOR';
+
+              if (q.check_in && q.check_out) {
+                  allQueries.push(q);
+                  requestCount++;
+              }
 
               if (q.check_in && q.check_out) {
                   allQueries.push(q);
@@ -940,10 +1040,13 @@ const cIn = new Date(q.check_in);
                   break;
               }
           }
-          const totalAmount = rate.breakdown.reduce((sum, b) => sum + b.price, 0);
+const totalAmount = rate.breakdown.reduce((sum, b) => sum + b.price, 0);
           const averageRate = Math.round(totalAmount / rate.breakdown.length);
           const mealViewLine = `${rate.applied_meal}${rate.applied_view ? ` / ${rate.applied_view}` : ''}`;
-          const dateDisplay = formatDateRange(query.check_in, query.check_out);
+          
+          // 🛑 ERROR WAS HERE: "dateLabel" is not defined in this scope.
+          // ✅ FIX: Use "query.dateLabel" only.
+          const dateDisplay = formatDateRange(query.check_in, query.check_out, query.dateLabel);
 
           const replyText = 
 `*${rate.hotel}* ${dateDisplay}

@@ -4,6 +4,13 @@
  * Production-friendly configuration using SHORT NUMERIC CODES
  */
 
+//TESTCLIENT
+
+// const CLIENTS = {
+//   101: '120363408948308095@g.us', // TEST CLIENT 1
+// }
+
+
 // ======================
 // CLIENT GROUPS
 // ======================
@@ -39,39 +46,44 @@ const CLIENTS = {
   104: '120363314618782087@g.us', //DASHT
   67: '120363403498808203@g.us', //TALHA TEMPTATIONS
   35: '120363365263487755@g.us', //ROSHAN TRAVELS
+ }
 
-}
 
+//TEST VENDORS
+
+// const VENDORS = {
+//    900: '120363423987359830@g.us', //TEST vendor 1
+//    901:'120363407421324505@g.us', //TEST vendor 2
+// }
 
 // ======================
 // VENDOR GROUPS
 // ======================
 
 const VENDORS = {
-   900: '120363423848269620@g.us', //TEST
-   901: '120363421799666970@g.us', // FlyUnique
-   902: '120363312735747310@g.us', // HBA Trvl Hotel VS Nwtt
-   905: '120363297808806322@g.us', // Agent HBA PAK / ATT266
-   906: '120363421038166711@g.us', // HBA 1540 🤝 ASKANT
-   907: '120363422210264688@g.us', // HBA 🤝 KENZI HOSPITALITY 49
-   908: '120363422656893710@g.us', // HBA-Imran Bhai
-   909: '120363419322714295@g.us', // 475 HBA 🤝 ALSUBAEE HOLIDAYS
-   910: '120363366561202735@g.us',  // Aden
-   911: '120363404455208031@g.us', // Arkaan
-   912: '120363421934695518@g.us', // HLT
-   913: '120363299136246491@g.us', // WOSOL
-   914: '120363314562298136@g.us', //RITAJ
-   915: '120363420882619412@g.us', // SERB
-   916: '120363420601536045@g.us', //SEDRA
-   917: '120363308383480158@g.us', //SMOOTH
-   918: '120363315331091127@g.us', // IMS
-   919: '120363320286132315@g.us', //UNIWORLD 
-   920: '120363402200576408@g.us', //JANATAN
-   921: '120363399150192081@g.us', //HAMMAD
-   922: '120363347278514375@g.us', //TABARAK
-   923: '120363336336214623@g.us', //MAYSAN
-   
-}
+  900: '120363423848269620@g.us', //TEST
+  901: '120363421799666970@g.us', // FlyUnique
+  902: '120363312735747310@g.us', // HBA Trvl Hotel VS Nwtt
+  905: '120363297808806322@g.us', // Agent HBA PAK / ATT266
+  906: '120363421038166711@g.us', // HBA 1540 🤝 ASKANT
+  907: '120363422210264688@g.us', // HBA 🤝 KENZI HOSPITALITY 49
+  908: '120363422656893710@g.us', // HBA-Imran Bhai
+  909: '120363419322714295@g.us', // 475 HBA 🤝 ALSUBAEE HOLIDAYS
+  910: '120363366561202735@g.us',  // Aden
+  911: '120363404455208031@g.us', // Arkaan
+  912: '120363421934695518@g.us', // HLT
+  913: '120363299136246491@g.us', // WOSOL
+  914: '120363314562298136@g.us', //RITAJ
+  915: '120363420882619412@g.us', // SERB
+  916: '120363420601536045@g.us', //SEDRA
+  917: '120363308383480158@g.us', //SMOOTH
+  918: '120363315331091127@g.us', // IMS
+  919: '120363320286132315@g.us', //UNIWORLD 
+  920: '120363402200576408@g.us', //JANATAN
+  921: '120363399150192081@g.us', //HAMMAD
+  922: '120363347278514375@g.us', //TABARAK
+  923: '120363336336214623@g.us', //MAYSAN
+   }
 
 // ======================================================
 // HOTEL → VENDOR CODES
@@ -118,8 +130,8 @@ const HOTEL_VENDOR_MAP = {
     'Makkah Hotel': [907, 908, 905, 902, 901], 
     'Makkah Towers': [907, 908, 905, 902, 901], 
 
-    // ============================================================
-    // 🕋 MAKKAH - JABAL OMAR & HARAM FRONTLINE
+     // ============================================================
+     // 🕋 MAKKAH - JABAL OMAR & HARAM FRONTLINE
     // ============================================================
     'Hilton Makkah Convention': [910],
     'Hilton Suites Makkah': [901, 910],
@@ -129,24 +141,35 @@ const HOTEL_VENDOR_MAP = {
     'Address Jabal Omar': [913, 922],
     'Sheraton Makkah Jabal Al Kaaba': [922],
     'DoubleTree by Hilton Makkah': [910],
-    'Le Meridien Makkah': [90],                 // (The one near Haram)
+    'Le Meridien Makkah': [901],                 // (The one near Haram)
     'Waqf Uthman': [914, 902, 901],                // Standardized from 'Waqf Usman'
 
     // ============================================================
     // 🚌 MAKKAH - SHUTTLE / AZIZIYAH / KUDAI / 3-4 STAR
     // ============================================================
-    'Voco Makkah': [901, 902, 910, 911, 913], // Merged: VOCO, Vocco
+     'Voco Makkah': [901, 902, 910, 911, 913], // Merged: VOCO, Vocco
     'Kiswa Towers': [910, 908, 906],
     'Elaf Ajyad': [902, 901],
     'Le Meridien Towers Makkah': [919],          // (Kudai - Shuttle)
     'Novotel Makkah Thakher City': [917],
     'Holiday Inn Makkah Al Aziziah': [919],
 };
+
+
+//TESTING HOTEL VENDOR MAP
+
+
+// const HOTEL_VENDOR_MAP = {
+//     // ============================================================
+//     // 🕌 MADINAH - MARKAZIYA (CENTRAL AREA) - NORTH/MAIN
+//     // ============================================================
+//     'VOCO': [901],   
+// };
 // ======================================================
 // DEFAULT VENDOR CODES (UNKNOWN HOTELS)
 // ======================================================
 
-const DEFAULT_VENDOR_CODES = [900,901,905,902] //,901,902,905
+const DEFAULT_VENDOR_CODES = [900,901,902,905] //,901,902,905
 
 // ======================================================
 // GROUP ROLES (DERIVED, DO NOT EDIT MANUALLY)
@@ -204,27 +227,36 @@ function splitMeaningfulWords(text) {
     .filter(w => w.length >= 2 && !GENERIC_WORDS.has(w)) // Length >= 2 to catch short names
 }
 
-// 3. UPDATED MATCHING LOGIC
+// 3. UPDATED MATCHING LOGIC (BEST MATCH SCORING)
+// 🛡️ FIX: Now checks ALL hotels and picks the one with the MOST matching words
 function getVendorsForHotel(hotelName) {
   const normalizedInput = normalizeHotelName(hotelName)
   let vendorCodes = DEFAULT_VENDOR_CODES
 
   if (normalizedInput) {
     const inputWords = splitMeaningfulWords(normalizedInput)
+    let bestMatchScore = 0
 
     // Find the best match in the map
     for (const key of Object.keys(HOTEL_VENDOR_MAP)) {
       const keyWords = splitMeaningfulWords(normalizeHotelName(key))
       
+      // Skip empty keys
+      if (keyWords.length === 0) continue;
+
       // STRICT MATCH: Every meaningful word in the Map Key 
       // must exist in the User's Input
       const isFullMatch = keyWords.every(kw => 
         inputWords.includes(kw)
       )
 
-      if (isFullMatch && keyWords.length > 0) {
-        vendorCodes = HOTEL_VENDOR_MAP[key]
-        break 
+      // 🏆 THE UPGRADE: Only override if this match is BETTER (More specific)
+      // Example: "Movenpick Hajar" (Score 2) beats "Movenpick" (Score 1)
+      if (isFullMatch) {
+         if (keyWords.length > bestMatchScore) {
+             bestMatchScore = keyWords.length
+             vendorCodes = HOTEL_VENDOR_MAP[key]
+         }
       }
     }
   }
