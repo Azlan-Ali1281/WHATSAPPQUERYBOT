@@ -457,7 +457,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 // 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
       // REMOVED: manar, madinah, khalil (to protect "Emaar Al Manar", "Anwar Madinah")
       // KEPT: hidayah, miramar, concord, vision (Stand-alone names)
-      const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|taiba|aram|artal|oberoi|miramar|hidayah|hidaya|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/gi;
+      const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|oberoi|miramar|hidayah|hidaya|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/gi;
       preProcessedText = preProcessedText.replace(brandsRegex, '\n$1');
 // 🛡️ FIX 8: THE EXPLODER
         preProcessedText = preProcessedText.replace(

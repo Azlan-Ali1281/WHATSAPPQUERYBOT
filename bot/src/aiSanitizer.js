@@ -15,6 +15,7 @@ const OFFICIAL_REGISTRY = [
   "Leader Al Muna Kareem", "Odst Al Madinah", "Artal Al Munawara", "Zowar International", 
   "Taiba Front", "Aqeeq Madinah", "Frontel Al Harithia", "Dallah Taibah", 
   "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Province Al Sham",
+  "Gulnar Taiba", "Emaar Al Manar","Frontel Al Harithia",
   
   // 🕋 MAKKAH (Clock Tower)
   "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
@@ -47,6 +48,8 @@ async function sanitizeHotelNames(rawHotels) {
     ### 2. 🧠 MATCHING RULES
     - **Exact Match:** "Makkah Hotel" -> "Makkah Hotel"
     - **Fuzzy Match:** "Makah htl" -> "Makkah Hotel"
+    - **No Hallucination:** If a hotel has a strong identifier (e.g., "Gulnar", "Manar", "Emaar"), DO NOT map it to a registry hotel (like "Taiba Front") just because they share a word.
+    - **Specific Brands:** "Gulnar Taiba" is a specific hotel. If it's not in the registry, just return "Gulnar Taiba" cleaned, do NOT change it to "Taiba Front".
     - **Ambiguity:** - "Hilton" -> "Hilton Makkah Convention" (Default preference)
       - "Swiss" -> "Swissotel Makkah"
       - "Voco" -> "Voco Makkah"
