@@ -4,6 +4,19 @@ const {
   fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys')
 
+
+const { initDatabase } = require('./database');
+
+
+const { 
+    createParentQuery, 
+    createChildQuery, 
+    logVendorRequest,
+    getContextBySentMsgId, // 👈 ADD THIS
+    saveVendorQuote, 
+    updateRequestStatus // 👈 ADD THIS
+} = require('./database');
+
 // ✅ CORRECT (Relative to index.js)
 const { calculateQuote } = require('./v2/calculator');
 const { formatForOwner } = require('./v2/formatter');
@@ -20,7 +33,8 @@ const { sanitizeHotelNames } = require('./aiSanitizer');
 const {
   getGroupRole,
   getVendorsForHotel,
-  getOwnerGroups
+  getOwnerGroups,
+  getClientCode
 } = require('./groupConfig')
 
 // ======================================================
@@ -180,19 +194,36 @@ function extractMeal(text = '') {
 function extractView(text = '') {
   const t = text.toLowerCase();
   
-  // 🕌 PREMIER / PRIME VIEWS
-  // Handles: "Premier Kaaba", "Preimer Kaba", "Prime Haram"
-  if (/\b(premier|preimer|prime|prm)\s*(kaaba|kaba|kabah|kbah)\b/.test(t)) return 'PREMIER KAABA VIEW';
-  if (/\b(premier|preimer|prime|prm)\s*(haram|harem|harum)\b/.test(t)) return 'PREMIER HARAM VIEW';
+  // 🕌 PREMIER / PRIME / FULL HARAM & KAABA
+  // Matches: premier, prime, prm, full, fl
+  const isPremier = /\b(premier|preimer|prime|prm|full|fl)\b/.test(t);
 
-  // 🌓 PARTIAL VIEWS
-  // Handles: "Partial Kaaba", "Side Haram", "Semi Kaba"
-  if (/\b(partial|part|side|semi)\s*(kaaba|kaba|kabah|haram|harem)\b/.test(t)) return 'PARTIAL KAABA VIEW';
+  // 🕋 KAABA PATTERNS
+  // Matches: kaaba, kaba, kabah, kbah, kabba, kabaa
+  const kaabaPattern = /\b(ka+ba+h?|kbah)\b/;
 
-  // 🕋 STANDARD VIEWS
-  if (/\b(kaaba|kaba|kabah|kbah)\b/.test(t)) return 'KAABA VIEW';
-  if (/\b(haram|harem|harum)\b/.test(t)) return 'HARAM VIEW';
-  if (/\b(city|street)\b/.test(t)) return 'CITY VIEW';
+  // 🕌 HARAM PATTERNS
+  // Matches: haram, harem, harum, horm, hrm, hrm view
+  const haramPattern = /\b(har[aeu]m|horm|hrm)\b/;
+
+  // 🌓 PARTIAL / SIDE VIEWS
+  // Matches: partial, part, prtl, side, sd, semi, smi, half
+  const isPartial = /\b(partial|part|prtl|side|sd|semi|smi|half)\b/.test(t);
+
+  // DETECTION LOGIC
+  if (kaabaPattern.test(t)) {
+      if (isPartial) return 'PARTIAL KAABA VIEW';
+      if (isPremier) return 'PREMIER KAABA VIEW';
+      return 'KAABA VIEW';
+  }
+
+  if (haramPattern.test(t)) {
+      if (isPartial) return 'PARTIAL HARAM VIEW';
+      if (isPremier) return 'PREMIER HARAM VIEW';
+      return 'HARAM VIEW';
+  }
+
+  if (/\b(city|st|street|cty|back|bck|rd|road)\b/.test(t)) return 'CITY VIEW';
   
   return '';
 }
@@ -262,7 +293,8 @@ function isRoomOnlyLine(line = '') {
   // Added: qued
   // 3. KEYWORD DICTIONARY
   // Added: person (singular)
-  const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|person|bed|beds|view|veiw|vew|city|haram|kaaba|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
+  // 3. KEYWORD DICTIONARY (Updated with new view keywords)
+ const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|person|bed|beds|view|veiw|vew|city|st|street|cty|back|bck|haram|harem|hrm|kaaba|kaba|kbah|partial|part|prtl|side|sd|semi|smi|fl|full|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
 
   if (t.split(/\s+/).length === 1 && roomLock.test(t)) return true;
 
@@ -406,7 +438,8 @@ async function startBot() {
     }
 
     const role = getGroupRole(groupId)
-    const type = classifyMessage({ groupRole: role, text: finalProcessingText })
+    // ✅ PASS 'msg' SO CLASSIFIER CAN CHECK DATABASE
+    const type = classifyMessage({ groupRole: role, text: finalProcessingText, msg: msg })
     const universalTypes = extractRoomTypesFromText(finalProcessingText);
 
     console.log('\n----------------------------')
@@ -670,7 +703,17 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return;
       }
 
-      const parent = createParent({ clientGroupId: groupId, originalMessage: msg });
+      // ============================================================
+      // 💾 DATABASE: SAVE PARENT QUERY
+      // ============================================================
+      const parentId = createParentQuery({
+          message_id: msg.key.id,
+          remote_jid: groupId,
+          participant: senderId,  // Ensure 'userId' is defined in your scope
+          original_text: effectiveText,
+      });
+
+      console.log(`📝 DB: Saved Parent Query ID: ${parentId}`);
       // ... (Code continues to globalHotels extraction)
       const allQueries = [];
       
@@ -980,7 +1023,11 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
               
               // Apply Global Hints if missing
               if (!q.meal && mealHint) q.meal = mealHint;
-              if (!q.view && viewHint) q.view = viewHint;
+              if (viewHint) {
+                  q.view = viewHint; 
+              } else if (!q.view) {
+                  q.view = "CITY VIEW"; 
+              }
               
               // 🛡️ FIX 26-B: Room Count Sanity Cap
               // Ignore numbers > 50 (Prevents years like "2026" being treated as room count)
@@ -1019,6 +1066,25 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
               // 🛡️ FIX: Expand AI Abbreviations
               if (q.meal === 'IF') q.meal = 'IFTAR';
               if (q.meal === 'SU') q.meal = 'SUHOOR';
+
+
+              // ============================================================
+               // 💾 DATABASE: SAVE CHILD QUERY
+               // ============================================================
+               const childId = createChildQuery({
+                   parent_id: parentId,
+                   hotel_name: q.hotel,
+                   check_in: q.check_in,
+                   check_out: q.check_out,
+                   room_type: q.room_type,
+                   rooms: q.rooms,
+                   persons: q.persons
+               });
+               
+               // Attach ID to the object so we can use it later when sending to vendors
+               q.db_child_id = childId; 
+               
+               console.log(`   ↳ 📝 DB: Saved Child Query ID: ${childId} (${q.hotel})`);
 
               if (q.check_in && q.check_out) {
                   allQueries.push(q);
@@ -1179,60 +1245,163 @@ if (queriesForVendors.length > 0) {
                   // Limit: Respect global limit (e.g. max 2 vendors per hotel), but primarily fresh ones
                   const selectedVendors = availableVendors.slice(0, LIMITS.MAX_VENDORS_PER_HOTEL);
 
-                  if (selectedVendors.length > 0) {
-                      console.log(`📤 Sending ${hotel} (${relevantQuery.check_in}) to:`, selectedVendors);
-                      
-                      const child = createChild({ parentId: parent.id, parsed: relevantQuery });
-                      
-                      for (const vg of selectedVendors) {
-                          const sent = await sock.sendMessage(vg, { text: formatQueryForVendor(child) });
-                          if (sent?.key?.id) linkVendorMessage(child.id, sent.key.id);
-                          
-                          // 🔒 LOCK THIS VENDOR
-                          usedVendorsForThisDate.add(vg); 
-                          
-                          await sleep(VENDOR_SEND_DELAY_MS);
-                      }
-                  } else {
-                      console.log(`⚠️ Skipped ${hotel} (${relevantQuery.check_in}): All capable vendors already booked for these dates.`);
-                  }
+// ... inside the loop where you process each hotel ...
+
+if (selectedVendors.length > 0) {
+          console.log(`📤 Sending ${hotel} (${relevantQuery.check_in}) to:`, selectedVendors);
+          
+          const dbChildId = relevantQuery.db_child_id;
+
+          if (!dbChildId) {
+              console.error("❌ Error: Missing DB Child ID for", hotel);
+              continue;
+          }
+          // This calls your groupConfig logic to get '101'
+          const clientCode = getClientCode(groupId) || 'REQ';
+
+
+
+          // 🔍 LOG 1: Check variables here
+          console.log(`🔍 [DEBUG] Pre-Format: ID=${dbChildId}, Code=${clientCode}`);
+
+          // ✅ We pass 'clientCode' and 'id' explicitly to the formatter
+          const vendorMessageText = formatQueryForVendor({ 
+              id: dbChildId,         
+              clientCode: clientCode, 
+              parsed: relevantQuery 
+          });
+
+          // 🔍 LOG 2: Check the final string
+          console.log(`🔍 [DEBUG] Final Text Preview: ${vendorMessageText.split('\n')[0]}`);
+
+          for (const vg of selectedVendors) {
+              // 1. Send Message
+              const sent = await sock.sendMessage(vg, { text: vendorMessageText });
+              
+              // 2. 💾 DATABASE: LOG REQUEST
+              if (sent?.key?.id) {
+                  logVendorRequest({
+                      child_id: dbChildId,
+                      vendor_group_id: vg,
+                      sent_message_id: sent.key.id
+                  });
+                  console.log(`      ↳ 🔗 DB: Linked Message ${sent.key.id} to Child ${dbChildId} [${clientCode}]`);
               }
+              
+              // 🔒 LOCK THIS VENDOR
+              usedVendorsForThisDate.add(vg); 
+              
+              await sleep(VENDOR_SEND_DELAY_MS);
+          }
+      } else {
+          console.log(`⚠️ Skipped ${hotel}: All vendors booked.`);
+      }
+                                  }
           }
         }
       }
+      
+      // ======================================================
+    // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
     // ======================================================
+// ======================================================
     // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
     // ======================================================
     if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
       
-      let child = null;
+      let context = null;
       const ctx = msg.message.extendedTextMessage?.contextInfo;
-      if (ctx?.stanzaId) child = getChildByVendorMessage(ctx.stanzaId);
-      if (!child) child = findMatchingChild(rawText, getOpenChildren());
-      
-      if (!child) {
-          console.log("⚠️ VENDOR_REPLY: Could not match to a client query. Ignoring.");
+
+      if (ctx?.stanzaId) {
+          context = getContextBySentMsgId(ctx.stanzaId);
+      }
+
+      if (!context) {
+          console.log("⚠️ VENDOR_REPLY: Database could not find original message ID:", ctx?.stanzaId);
           return;
       }
 
+      console.log(`✅ DB MATCH: Vendor replied to Query ID ${context.child_id} (${context.requested_hotel})`);
+
       try {
-          const queryData = child.parsed || child; 
+          // ============================================================
+          // 🕵️ DETECT HOTEL CHANGE (The "Le Meridien" Fix)
+          // ============================================================
+          // Logic: Run the reply text through the sanitizer. 
+          // If a VALID hotel is found, override the requested hotel.
+          
+          let actualHotel = context.requested_hotel; // Default to what we asked for
+          
+          // 1. Clean the reply lines (remove dates/prices to find names)
+          const potentialLines = rawText.split('\n')
+              .map(l => l.trim())
+              .filter(l => l.length > 3 && !isRoomOnlyLine(l) && !/^\d+/.test(l));
+
+          if (potentialLines.length > 0) {
+              console.log("🔍 Scanning reply for Hotel Name Override...", potentialLines);
+              
+              // 2. Run Sanitizer
+              const sanitizedCandidates = await sanitizeHotelNames(potentialLines);
+              
+              // 3. Pick the first valid hotel that isn't a command
+              const newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
+              
+              if (newHotel) {
+                  console.log(`🔄 Hotel Override Detected: "${actualHotel}" -> "${newHotel}"`);
+                  actualHotel = newHotel;
+              }
+          }
+
+          // 🛡️ SMART VIEW DETECTION (Handles typos & partials)
+          let detectedView = extractView(rawText); // Run the vendor text through the new helper
+          
+          // Fallback: If vendor didn't mention a view, keep the original client request
+          if (!detectedView) {
+              detectedView = context.view || "CITY VIEW";
+          }
+
+          // ============================================================
+          // 🧮 PREPARE CALCULATOR
+          // ============================================================
+          const queryData = {
+              hotel: actualHotel, // Use the detected hotel
+              check_in: context.check_in,
+              check_out: context.check_out,
+              room_type: context.room_type,
+              rooms: context.rooms,
+              persons: context.persons,
+              db_child_id: context.child_id,
+              view: detectedView
+          };
+          
           console.log(`🧪 V2: Calculation started for ${queryData.hotel}...`);
           
           const v2Quote = await calculateQuote(queryData, rawText);
           
           if (v2Quote) {
-              const report = formatForOwner(v2Quote);
+              // 1. SAVE QUOTE
+              saveVendorQuote({
+                  request_id: context.request_id,
+                  raw_reply_text: rawText,
+                  quoted_price: v2Quote.total_price || 0,
+                  vendor_hotel_name: actualHotel, // Save "Le Meridien"
+                  is_match: 1, 
+                  full_json: JSON.stringify(v2Quote)
+              });
               
+              // 2. UPDATE STATUS (Mark as REPLIED)
+              updateRequestStatus(context.request_id, 'REPLIED');
+              console.log(`💾 DB: Saved Quote & Updated Status to REPLIED`);
+
+              // 3. SEND TO OWNER
+              const report = formatForOwner(v2Quote);
               const owners = getOwnerGroups();
               for (const ownerGroupId of owners) {
                   await sock.sendMessage(ownerGroupId, { text: report });
               }
-              console.log("✅ V2 Shadow Report sent to Owners");
-              return; 
 
           } else {
-              console.log("❌ V2: AI determined this is not a quote.");
+              console.log("❌ V2: AI determined this is not a valid quote.");
           }
       } catch (err) {
           console.error("⚠️ V2 Critical Error:", err);
@@ -1240,6 +1409,7 @@ if (queriesForVendors.length > 0) {
       
       return; 
     }
+
   })
   sock.ev.on('connection.update', ({ connection }) => {
     if (connection === 'close') {

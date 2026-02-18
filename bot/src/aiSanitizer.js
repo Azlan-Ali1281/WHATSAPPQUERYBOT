@@ -9,7 +9,7 @@ const openai = new OpenAI({
 // 📋 THE GOLDEN LIST (Matches your GroupConfig Keys exactly)
 const OFFICIAL_REGISTRY = [
   // 🕌 MADINAH
-  "Anwar Al Madinah", "Saja Al Madinah", "Pullman Zamzam Madinah", "Madinah Hilton", 
+  "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower",
   "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Iman InterContinental", 
   "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", 
   "Leader Al Muna Kareem", "Odst Al Madinah", "Artal Al Munawara", "Zowar International", 
@@ -58,6 +58,7 @@ async function sanitizeHotelNames(rawHotels) {
     - **Differentiation:**
       - "Makkah Hotel" and "Makkah Towers" are DIFFERENT. Respect the user's choice.
       - "Emaar Grand" vs "Emaar Elite" vs "Emaar Royal". Don't mix them.
+      - "Saja Makkah" vs "Saja Madinah". Don't mix them.
 
     ### 3. 🛡️ SANITIZATION RULES
     - **Unknown Hotels:** If the hotel is VALID but NOT in the Official Registry (e.g. "Four Points"), just fix the spelling. DO NOT force it into the registry.

@@ -23,49 +23,46 @@ function formatDateRange(checkIn, checkOut) {
   return (m1 === m2) ? `${day1}-${day2} ${month1}` : `${day1} ${month1} - ${day2} ${month2}`
 }
 
-function formatQueryForVendor(child) {
-  const q = child.parsed
-  const parent = getParent(child.parentId)
-  const clientGroupId = parent?.clientGroupId
-  // Use a fallback code if clientCode is missing
-  const clientCode = getClientCode(clientGroupId) || 'UNKNOWN'
+function formatQueryForVendor(data) {
+  // 🛡️ DATABASE MAPPING
+  // We now extract the IDs directly from the object sent by index.js
+  const q = data.parsed;
+  const clientCode = data.clientCode || 'REQ';
+  const dbId = data.id || '0';
 
-  const lines = []
+  const lines = [];
 
-  // 1️⃣ HOTEL NAME
-  // Converts "EMAAR AL MANAR" -> "EMAAR AL MANAR" (Upper Case Preferred)
+  // 1️⃣ REFERENCE LINE (Top Priority)
+  // This will now show: Ref: *HBA-10*
+
+  // 2️⃣ HOTEL NAME
   lines.push(q.hotel.toUpperCase())
 
-  // 2️⃣ DATE RANGE (WITH SPECIAL LABEL SUPPORT)
-  // If we have a special label like "LAST ASHRA", use it.
+  // 3️⃣ DATE RANGE
   if (q.dateLabel) {
     lines.push(q.dateLabel.toUpperCase())
   } else {
-    // Otherwise use standard date formatting (e.g. 19-20 FEB)
     const dateLine = formatDateRange(q.check_in, q.check_out)
     if (dateLine) lines.push(dateLine)
   }
 
-  // 3️⃣ ROOM LINE (Logic: 2 QUAD vs QUAD)
-  // If rooms > 1, prefix the count (e.g. "2 TRIPLE"). Else just "TRIPLE"
+  // 4️⃣ ROOM LINE
   const roomPrefix = (q.rooms && q.rooms > 1) ? `${q.rooms} ` : ''
   lines.push(`${roomPrefix}${(q.room_type || 'DOUBLE').toUpperCase()}`)
 
-  // 4️⃣ MEAL (SKIP RO)
-  // Only show meal if it's NOT Room Only
+  // 5️⃣ MEAL (Show everything except RO)
   if (q.meal && q.meal !== 'RO') {
     lines.push(q.meal.toUpperCase())
   }
 
-  // 5️⃣ VIEW (SKIP CITY)
-  // Only show view if it's NOT City View
+  // 6️⃣ VIEW (Show everything except CITY)
   if (q.view && !/CITY/i.test(q.view)) {
     lines.push(q.view.toUpperCase())
   }
 
-  // 6️⃣ BLANK LINE + CLIENT CODE
-  lines.push('')
-  lines.push(`ref#${clientCode}`)
+  
+  lines.push(''); // Gap
+  lines.push(`Ref: *${clientCode}*`);
 
   return lines.join('\n')
 }

@@ -4,6 +4,9 @@
  * Determines message intent safely
  */
 
+// src/messageClassifier.js
+const { getContextBySentMsgId, getLastActiveRequest } = require('./database');
+
 function normalize(text) {
   return text.toLowerCase().trim()
 }
@@ -107,7 +110,7 @@ function looksLikeRate(text) {
   )
 }
 
-function classifyMessage({ groupRole, text }) {
+function classifyMessage({ groupRole, text, msg }) {
   if (!text || !text.trim()) {
     return 'IGNORE'
   }
@@ -127,15 +130,33 @@ function classifyMessage({ groupRole, text }) {
   }
 
   // VENDOR SIDE
-  if (groupRole === 'VENDOR') {
-    if (looksLikeRate(text)) {
-      return 'VENDOR_REPLY'
+if (groupRole === 'VENDOR') {
+    
+    // 1. STRATEGY A: Direct Reply (Swipe Right)
+    // We check if the message ID they replied to exists in our 'vendor_requests' table.
+    const replyId = msg?.message?.extendedTextMessage?.contextInfo?.stanzaId;
+    if (replyId) {
+        const directMatch = getContextBySentMsgId(replyId);
+        if (directMatch) {
+            return 'VENDOR_REPLY'; // ✅ Valid Reply found in DB
+        }
     }
-    return 'IGNORE'
+
+    // 2. STRATEGY B: Active Session (Fallback)
+    // If they didn't swipe right, we check if we are currently WAITING for a reply from them.
+    const vendorId = msg?.key?.remoteJid;
+    if (vendorId) {
+        const activeMatch = getLastActiveRequest(vendorId);
+        if (activeMatch) {
+            return 'VENDOR_REPLY'; // ✅ Found an open ticket for this vendor
+        }
+    }
+
+    // ❌ If neither match found, it's just random chatter. Ignore it.
+    return 'IGNORE';
   }
 
-  // OWNER / ADMIN
-  return 'IGNORE'
+  return 'IGNORE';
 }
 
 module.exports = {

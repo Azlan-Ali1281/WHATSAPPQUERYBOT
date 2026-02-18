@@ -5,7 +5,7 @@
 
 const EMPLOYEE_IDS = new Set([
     '13026770075820@lid', //SHAHEER
-    //'243159590269138@lid' //ANAS
+    '243159590269138@lid' //ANAS
 ])
 
 function isEmployee(jid) {
