@@ -165,7 +165,7 @@ function extractMeal(text = '') {
   }
 
   // Handles: Suhoor, Sehri, Sahri, Iftar, Iftari, Aftari
-  if (/\b(SUHOOR|SUHUR|SEHRI|SAHRI|SEHRY)\b/.test(t)) return 'SUHOOR';
+  if (/\b(SUHOOR|SUHUR|SEHRI|SAHRI|SEHRY|SOHOR)\b/.test(t)) return 'SUHOOR';
   if (/\b(IFTAR|IFTARI|AFTARI|IFTAAR)\b/.test(t)) return 'IFTAR';
   
   // 🏨 STANDARD MEALS
@@ -656,10 +656,17 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           }
       }
       
+      const HUMAN_AGENT_ID = '243159590269138@lid'; 
+
+      // 🚨 FAILURE 1: NO VALID BLOCKS (Orphan rescue failed)
       if (blocks.length === 0) {
-        for (const owner of getOwnerGroups()) {
-          await sock.sendMessage(owner, { text: '⚠️ No valid booking blocks detected' });
-        }
+        console.log("⚠️ No booking blocks. Summoning human.");
+        
+        await sock.sendMessage(groupId, { 
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ I cannot understand this query. Please deal with it manually.`,
+            mentions: [HUMAN_AGENT_ID] 
+        }, { quoted: msg });
+        
         return;
       }
 
@@ -678,14 +685,77 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       let globalHotels = [];
       blocks.forEach(b => globalHotels.push(...(b.hotels || [])));
       globalHotels = [...new Set(globalHotels)]; 
-      
+
+      // ============================================================
+      // 🛡️ HARD FILTER: "ANY" REMOVAL
+      // ============================================================
+      // Logic: 
+      // 1. Remove ALL hotels starting with "Any" (e.g. "Any 5 star", "Any good hotel")
+      // 2. If NO hotels remain, DROP THE PARENT QUERY COMPLETELY.
+
+      const specificHotels = globalHotels.filter(h => !/^any\b/i.test(h));
+
+      if (specificHotels.length < globalHotels.length) {
+          console.log("🧹 Dropped generic 'Any...' hotels.");
+          
+          // 1. Update the Global List to only specific ones
+          globalHotels = specificHotels;
+
+          // 2. Clean up the blocks so we don't process "Any" later
+          blocks.forEach(b => {
+              if (b.hotels) {
+                  b.hotels = b.hotels.filter(h => !/^any\b/i.test(h));
+              }
+          });
+      }
+
+      // 🚨 FAILURE 2: ONLY "ANY" HOTELS FOUND
+      if (globalHotels.length === 0) {
+          console.log("⚠️ Query rejected: Only generic 'Any' hotels found. Summoning human.");
+          
+          await sock.sendMessage(groupId, { 
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ Query rejected I Cannot Check Any Hotel Queries. Please deal with it manually.`,
+            mentions: [HUMAN_AGENT_ID] 
+        }, { quoted: msg });
+          
+          return;
+      }
+
+      // 🚨 KILL SWITCH: If no specific hotels remain, STOP.
+      if (globalHotels.length === 0) {
+          console.log("⚠️ Query rejected: Only generic 'Any' hotels found.");
+          return;
+      }
+
+
       let sanitizedMap = {};
       if (globalHotels.length > 0) {
           console.log("🧹 Sanitizing hotels:", globalHotels);
           const cleaned = await sanitizeHotelNames(globalHotels);
           console.log("✅ Result:", cleaned);
+
+          // ============================================================
+          // 🛡️ FIX: "MAKKAH HOTEL" LABEL BUG (Post-Sanitization)
+          // ============================================================
+          // Logic: Now that names are clean ("Makah hotel:" -> "Makkah Hotel"), 
+          // we check if "Makkah Hotel" exists alongside other hotels.
           
+          const makkahIndex = cleaned.findIndex(h => h && h.toUpperCase() === 'MAKKAH HOTEL');
+          const hasOthers = cleaned.some((h, i) => h && i !== makkahIndex);
+
+          if (makkahIndex !== -1 && hasOthers) {
+               console.log(`🧹 Dropping 'Makkah Hotel' (Label) post-sanitization.`);
+               cleaned[makkahIndex] = "DROP_ME"; // Mark for deletion
+          }
+
+          // ============================================================
+          // 🗺️ MAP RAW -> CLEAN
+          // ============================================================
           globalHotels.forEach((raw, i) => { 
+              if (cleaned[i] === "DROP_ME") {
+                  return; // 🚫 Skip adding this to the map (effectively deletes it)
+              }
+              
               if (cleaned[i]) {
                   sanitizedMap[raw] = cleaned[i];
               } else {
@@ -693,8 +763,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
                   sanitizedMap[raw] = raw; 
               }
           });
-      }
-      
+      }      
       let lastKnownHotels = []; 
 
       // 🕵️ CONVERSATIONAL REPAIR
@@ -975,10 +1044,18 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
           }
       }
       
+    // 🚨 FAILURE 3: NO VALID QUERIES GENERATED (After parsing)
       if (!allQueries.length) {
-        for (const owner of getOwnerGroups()) {
-          await sock.sendMessage(owner, { text: '⚠️ Booking rejected (no valid queries)' }, { quoted: msg });
-        }
+        console.log("⚠️ Booking rejected (no valid queries). Summoning human.");
+        
+        // ⚠️ Ensure HUMAN_AGENT_ID is defined at the top of your file!
+        // const HUMAN_AGENT_ID = '923001234567@s.whatsapp.net'; 
+
+        await sock.sendMessage(groupId, { 
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ Query rejected (No valid queries generated). Please deal with it manually.`,
+            mentions: [HUMAN_AGENT_ID] 
+        }, { quoted: msg });
+        
         return;
       }
 
