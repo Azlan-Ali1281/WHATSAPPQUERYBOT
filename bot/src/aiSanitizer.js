@@ -24,13 +24,13 @@ const OFFICIAL_REGISTRY = [
 
   // 🕋 MAKKAH (Haram/Jabal Omar)
   "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 
-  "Conrad Makkah", "Jabal Omar Marriott", "Address Jabal Omar", 
+  "Conrad Makkah", "Jabal Omar Marriott", "Saif Al Majd","Address Jabal Omar", 
   "Sheraton Makkah Jabal Al Kaaba", "DoubleTree by Hilton Makkah", 
   "Le Meridien Makkah", "Waqf Uthman",
 
   // 🚌 MAKKAH (Aziziyah/Shuttle)
   "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", 
-  "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah"
+  "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah", "Triple One" ,"Four Points by Sheraton Makkah", "Emaar Grand Makkah", "Emaar Elite Makkah"
 ];
 
 async function sanitizeHotelNames(rawHotels) {

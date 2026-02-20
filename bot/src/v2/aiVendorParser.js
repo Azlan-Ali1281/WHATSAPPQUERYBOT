@@ -6,108 +6,109 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-async function parseVendorMessageWithAI(text) {
+async function parseVendorMessageWithAI(text, childQuery = {}) {
   if (!text || text.length < 2) return null;
+
+  const reqIn = childQuery.check_in || "Unknown";
+  const reqOut = childQuery.check_out || "Unknown";
 
   const systemPrompt = `
     You are a Senior Hotel Rate Analyst for Makkah & Madinah markets.
-    Your job is to extract PRICING DATA from vendor messages.
+    Your job is to extract PRICING DATA from highly compressed vendor messages.
 
-    ### 🧠 CRITICAL LOGIC: DATES & SPLIT STAYS (PRIORITY 1)
-    Vendors use shorthand like "1/6 march" or "1-6 mar" or "25/04".
-    - "1/6 march" means Check-in: 1st, Check-out: 6th.
-    - If specific dates are given, you MUST return them in the 'split_rates' array with the exact date range.
-    - **Year Assumption:** Always assume the current/next logical year (e.g. 2026).
-    
-    Example Input: 
-    "1-6 march 485, 6-9 march 585"
-    
-    Example Output:
-    {
-      "split_rates": [
-        { "dates": "2026-03-01 to 2026-03-06", "rate": 485, "type": "BASE" },
-        { "dates": "2026-03-06 to 2026-03-09", "rate": 585, "type": "BASE" }
-      ]
-    }
+    ### 🎯 CLIENT CONTEXT (CRITICAL):
+    The client originally requested dates: ${reqIn} to ${reqOut}.
+    If the vendor replies with partial dates (like "26" or "from 24"), use this context to determine the correct month and year!
 
+    ### 🧠 CRITICAL LOGIC: DATES, AVAILABILITY & SPLIT STAYS (PRIORITY 1)
+    Vendors use shorthand like "1/6 march", "25/04", or partial availability keywords.
+    - "from 26 available" or "from 26 ava" -> Check-in is 26th. Use Client Context for month/year.
+    - "till 24" -> Check-out is 24th. Use Client Context for month/year.
+    - "24 to 26 ava" -> Check-in 24, Check-out 26.
+    - If specific or partial dates are given, you MUST return them in 'split_rates' with exact 'YYYY-MM-DD to YYYY-MM-DD' format.
+    
     ### 🧠 CORE LOGIC RULES (MUST FOLLOW):
 
-    1. **💰 BASE RATE vs. SPLIT RATES:**
-       - **Single Number:** "450" → { type: 'BASE', rate: 450, dates: null }
-       - **Weekday/Weekend (Slash):** Numbers are CLOSE (e.g., "1150/1250") → WD: 1150, WE: 1250.
-       - **Base/Extra Bed (Slash):** 2nd number is MUCH LOWER (e.g., "750/125") → Base: 750, Extra: 125.
-       - **Explicit Keys:** "WD 1780 WE 2130" → WD: 1780, WE: 2130.
+1. **💰 THE SLASH & MAGNITUDE RULE (STRICT):**
+       - If the vendor provides TWO base numbers (e.g., "400/500" or "400-500"):
+         - You **MUST NOT** use the type "BASE".
+         - You **MUST** create two separate objects in 'split_rates'.
+         - The HIGHER number (500) **MUST** be type: "WEEKEND".
+         - The LOWER number (400) **MUST** be type: "WEEKDAY".
+       - If there is only ONE number (e.g., "500"), use type: "BASE".
+       - If there is a THIRD much lower number (e.g., "400/500/150"), the 150 is "extra_bed_price".
 
-    2. **🛏️ EXTRA BED LOGIC:**
-       - Look for keywords: "ex", "ext", "extra", "extra bed".
-       - If format is "1100 ext 100", extra_bed_price = 100.
-       - If text says "**Flat**", "**Till Quad**", or "**Same Rate**", then extra_bed_price = 0 (Rate applies to all occupancies).
+    2. **🔤 ABBREVIATIONS & KEYWORDS:**
+       - "W.D" or "WD" = WEEKDAY Rate.
+       - "W.E" or "WE" = WEEKEND Rate.
+       - "ex", "ext", "extra", "+", "x" = EXTRA BED price.
+       - If text says "Flat", "Till Quad", or "Same Rate", extra_bed_price = 0.
 
-    3. **🕌 VIEW SURCHARGES (ADD-ONS):**
-       - Detect abbreviations: **KV** (Kaaba View), **HV** (Haram View), **CV** (City View).
-       - If a price follows (e.g., "KV 650"), it is a **SURCHARGE** to be added to the base rate.
-       - Example: "1150... KV 650" → Base: 1150, view_surcharges: { kaaba: 650 }.
+    3. **🏙️ VIEW SURCHARGES:**
+      - Look for keywords: "HV", "Haram", "Kaaba", "KV", "CV", "City".
+      - If you see "HV 150" or "Haram 150" or "Haram View 150", you MUST set "haram": 150.
+      - If you see "KV 200" or "Kaaba 200", you MUST set "kaaba": 200.
+      - Do not ignore these if they are written on the same line as prices.
 
-    4. **🍽️ MEAL PLANS:**
-       - Keywords: **RO** (Room Only), **BB** (Breakfast), **Suhoor**, **Iftar**, **HB**, **FB**.
-       - **Price Detection:**
-         - "140 sahoo" → Meal: Suhoor, Price: 140 (Per Person).
-         - "With Suhoor" (no number) → Meal: Suhoor, Price: 0 (Included in Base).
-         - "BB 35 PP" → Meal: BB, Price: 35.
+    4. **🍽️ MEAL PLANS & ADD-ONS (CRITICAL LOGIC):**
+       - Identify the meal included in the BASE RATE ("base_meal_plan").
+         - "dbl cls ro @670" -> base_meal_plan: "RO".
+         - "dbl bb 500" -> base_meal_plan: "BB".
+       - If there is an OPTIONAL add-on cost for meals (e.g., "bb @25"), set "meal_price_per_pax": 25.
+       - DO NOT set base_meal_plan to "BB" if the base rate is "RO" and BB is just an add-on.
 
-    5. **📅 DATES:**
-       - If the vendor explicitly mentions a date range (e.g., "5-9 mar", "25/04"), extract it.
-       - If multiple ranges are given with different prices, return them as an array in 'split_rates'.
+    5. **🛏️ VENDOR BASE ROOM CAPACITY:**
+       - Look at the room type the VENDOR quoted (e.g., "dbl", "trp", "quad").
+       - "sgl" or "single" -> 1
+       - "dbl" or "double" -> 2
+       - "trp" or "triple" -> 3
+       - "quad" -> 4
+       - "quint" -> 5
+       - If not specified, default to 2.
 
     ### 📝 EXAMPLES FOR TRAINING:
-    - Input: "700/120" 
-      -> { split_rates: [{type:'BASE', rate:700, dates: null}], extra_bed_price: 120 }
-    - Input: "1150/1250 EX 120" 
-      -> { split_rates: [{type:'WEEKDAY', rate:1150}, {type:'WEEKEND', rate:1250}], extra_bed_price: 120 }
-    - Input: "575 ro flat" 
-      -> { split_rates: [{type:'BASE', rate:575}], is_flat_rate: true }
-    - Input: "KV 650 HV 150" 
-      -> { view_surcharges: { kaaba: 650, haram: 150 } }
+    - Input: "dbl ro 670 ex 100 bb @ 25" 
+      -> split_rates: [{type:'BASE', rate:670}], base_meal_plan: "RO", extra_bed_price: 100, meal_price_per_pax: 25, quoted_base_capacity: 2
+      
+    - Input: "till 24 ava 550/650 ex 100" (Assuming context is Feb 20 to Feb 28)
+      -> split_rates: [{ dates: "2026-02-20 to 2026-02-24", type:'WEEKDAY', rate:550}, { dates: "2026-02-20 to 2026-02-24", type:'WEEKEND', rate:650}]
 
     ### 📤 OUTPUT JSON FORMAT (Strict JSON Only):
     {
       "split_rates": [
         { 
-          "dates": "YYYY-MM-DD to YYYY-MM-DD", // EXACT FORMAT or null (for global)
+          "dates": "YYYY-MM-DD to YYYY-MM-DD", // EXACT FORMAT or null
           "rate": 0,
-          "type": "BASE" // or WEEKDAY / WEEKEND
+          "type": "BASE"
         }
       ],
       "extra_bed_price": 0,
       "is_flat_rate": false,
-      "meal_plan": null,
+      "base_meal_plan": "RO",
       "meal_price_per_pax": 0,
       "view_surcharges": {
         "city": 0,
         "haram": 0,
         "kaaba": 0
       },
+      "quoted_base_capacity": 2,
       "currency": "SAR"
     }
   `;
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Fast & Cost-Effective
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `VENDOR REPLY: "${text}"` }
       ],
-      temperature: 0.1, // Low temp prevents hallucination
+      temperature: 0.1, 
     });
 
     const cleanJson = response.choices[0].message.content.replace(/```json|```/g, '').trim();
-    
-    // 🔍 DEBUG LOG: See exactly what the AI returned
     console.log("🤖 AI RAW OUTPUT:", cleanJson);
-
     return JSON.parse(cleanJson);
-
   } catch (error) {
     console.error("⚠️ AI Parse Failed:", error.message);
     return null;

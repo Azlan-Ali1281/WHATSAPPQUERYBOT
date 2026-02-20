@@ -9,12 +9,16 @@ const { initDatabase } = require('./database');
 
 
 const { 
-    createParentQuery, 
+    createParentQuery,
+    getLastActiveRequest, 
     createChildQuery, 
     logVendorRequest,
     getContextBySentMsgId, // 👈 ADD THIS
     saveVendorQuote, 
-    updateRequestStatus // 👈 ADD THIS
+    updateRequestStatus, // 👈 ADD THIS
+    recallLastParentQueries, // 👈 ADD THIS
+    recallLastChildQueries,   // 👈 ADD THIS
+    getQuoteByReqId // 👈 ADD THIS
 } = require('./database');
 
 // ✅ CORRECT (Relative to index.js)
@@ -41,11 +45,11 @@ const {
 // 🛡️ SAFETY LIMITS (Circuit Breaker)
 // ======================================================
 const LIMITS = {
-  MAX_TOTAL_REQUESTS: 6, // Hard cap: No more than 15 vendor msgs per user msg
-  MAX_DATE_RANGES: 3,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
-  MAX_HOTELS: 4,          // Max distinct hotels per query
-  MAX_ROOM_TYPES: 1,       // Max distinct room types per hotel
-  MAX_VENDORS_PER_HOTEL: 6 // 🛡️ NEW: How many vendors get the blast?
+  MAX_TOTAL_REQUESTS: 600, // Hard cap: No more than 15 vendor msgs per user msg
+  MAX_DATE_RANGES: 300,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
+  MAX_HOTELS: 400,          // Max distinct hotels per query
+  MAX_ROOM_TYPES: 100,       // Max distinct room types per hotel
+  MAX_VENDORS_PER_HOTEL: 600 // 🛡️ NEW: How many vendors get the blast?
 };
 
 const {
@@ -77,6 +81,60 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // ======================================================
 const PRODUCTION_MVP_MODE = true
 
+// ======================================================
+// 👑 OWNER COMMAND HANDLER (Recall/Delete)
+// ======================================================
+async function handleOwnerDeleteCommand(sock, msg, text) {
+    const groupId = msg.key.remoteJid;
+    // Matches: "/bot del p1", "/bot Del C5", etc.
+    const match = text.match(/^\/bot\s+del\s+([pc])(\d+)$/i);
+    
+    if (!match) {
+        await sock.sendMessage(groupId, { text: "❌ Invalid Command.\nUse: */bot Del P1* (Parents) or */bot Del C2* (Children)" }, { quoted: msg });
+        return;
+    }
+
+    const type = match[1].toUpperCase(); // 'P' or 'C'
+    const count = parseInt(match[2], 10);
+
+    if (count < 1 || count > 20) {
+        await sock.sendMessage(groupId, { text: "⚠️ You can only delete between 1 and 20 queries at a time to prevent rate limits." }, { quoted: msg });
+        return;
+    }
+
+    await sock.sendMessage(groupId, { text: `⏳ Recalling last ${count} ${type === 'P' ? 'Parent' : 'Child'} queries and deleting vendor messages...` }, { quoted: msg });
+
+    try {
+        let result;
+        if (type === 'P') result = recallLastParentQueries(count);
+        else result = recallLastChildQueries(count);
+
+        let delCount = 0;
+        
+        // Loop through and command WhatsApp to "Delete for Everyone"
+        for (const m of result.messages) {
+            try {
+                await sock.sendMessage(m.vendor_group_id, { 
+                    delete: { remoteJid: m.vendor_group_id, fromMe: true, id: m.sent_message_id } 
+                });
+                delCount++;
+                await sleep(300); // Wait 300ms between deletes so WhatsApp doesn't block the bot
+            } catch (e) {
+                console.log(`⚠️ Failed to delete msg in ${m.vendor_group_id}`);
+            }
+        }
+
+        const report = type === 'P' 
+            ? `✅ *RECALL COMPLETE*\n\n🗑️ Deleted ${result.pDeleted} Parent Queries\n🗑️ Deleted ${result.cDeleted} Child Queries\n💬 Recalled ${delCount} Vendor Messages.`
+            : `✅ *RECALL COMPLETE*\n\n🗑️ Deleted ${result.cDeleted} Child Queries\n💬 Recalled ${delCount} Vendor Messages.`;
+
+        await sock.sendMessage(groupId, { text: report }, { quoted: msg });
+
+    } catch (err) {
+        console.error("Recall Error:", err);
+        await sock.sendMessage(groupId, { text: "❌ Database error during deletion." }, { quoted: msg });
+    }
+}
 
 function extractRoomTypesFromText(text = '') {
   const t = text.toUpperCase();
@@ -93,30 +151,29 @@ function extractRoomTypesFromText(text = '') {
   }
 
   // 2. 🛡️ PAX / PERSON / GUEST MAPPING
+  // 🛡️ FIX: Added \s* to handle "2PAX" and "2 PAX"
   const paxPatterns = [
-    { reg: /\b(1\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'SINGLE' },
-    { reg: /\b(2\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'DOUBLE' },
-    { reg: /\b(3\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'TRIPLE' },
-    { reg: /\b(4\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'QUAD' },
-    { reg: /\b(5\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'QUINT' }
+    { reg: /(?:\b|\d)\s*(1\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'SINGLE' },
+    { reg: /(?:\b|\d)\s*(2\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'DOUBLE' },
+    { reg: /(?:\b|\d)\s*(3\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'TRIPLE' },
+    { reg: /(?:\b|\d)\s*(4\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'QUAD' },
+    { reg: /(?:\b|\d)\s*(5\s*(PAX|PERSON|PERSONS|GUEST|GUESTS|PEOPLE|BED|BEDS|PPL|PEOPLES))\b/i, type: 'QUINT' }
   ];
 
   paxPatterns.forEach(p => {
     if (p.reg.test(t)) types.push(p.type);
   });
 
-  // 3. 🏠 STANDARD TYPES & SHORTHAND (Fallback + PLURAL SUPPORT 'S')
-// 3. 🏠 STANDARD TYPES & SHORTHAND (Fallback + PLURAL SUPPORT 'S')
-  // Added (?:S?) to handle "SINGLES", "DOUBLES", "TRIPLES", "QUADS"
-  if (/\bSINGLE(?:S?)\b/i.test(t)) types.push('SINGLE');
-  if (/\b(DBL|DOUBLE|DUBLE|TWIN)(?:S?)\b/i.test(t)) types.push('DOUBLE');
-  if (/\b(TPL|TRP|TRIPLE|TRIPPLE|TRIPAL)(?:S?)\b/i.test(t)) types.push('TRIPLE'); 
-  
-  // 🛡️ FIX: Removed double pipe "||" which caused "Ghost Quad" bug
-  // Was: QD||QUED (Matched empty string) -> Now: QD|QUED
-  if (/\b(QUAD|QUARD|QAD|QUADR|QD|QUED)(?:S?)\b/i.test(t)) types.push('QUAD'); 
-  
-  if (/\b(QUINT|QUINTU|QUINTUPLE)(?:S?)\b/i.test(t)) types.push('QUINT');
+// 3. 🏠 STANDARD TYPES & SHORTHAND (Updated for 2TRP/2DBL)
+  // We check for: Start of line OR Non-Letter OR Digit
+  const start = /(?:^|[^A-Z0-9]|\d)/i; 
+  const end = /(?:$|[^A-Z0-9])/i;
+
+  if (new RegExp(start.source + "SINGLE(?:S?)" + end.source, "i").test(t)) types.push('SINGLE');
+  if (new RegExp(start.source + "(DBL|DOUBLE|DUBLE|TWIN)(?:S?)" + end.source, "i").test(t)) types.push('DOUBLE');
+  if (new RegExp(start.source + "(TPL|TRP|TRIPLE|TRIPPLE|TRIPAL)(?:S?)" + end.source, "i").test(t)) types.push('TRIPLE'); 
+  if (new RegExp(start.source + "(QUAD|QUARD|QAD|QUADR|QD|QUED)(?:S?)" + end.source, "i").test(t)) types.push('QUAD'); 
+  if (new RegExp(start.source + "(QUINT|QUINTU|QUINTUPLE)(?:S?)" + end.source, "i").test(t)) types.push('QUINT');
   
   if (/\b(SUITE|ROOM|BED)(?:S?)\b/i.test(t)) {
      if (t.includes('SUITE')) types.push('SUITE');
@@ -191,6 +248,15 @@ function extractMeal(text = '') {
   return '';
 }
 
+function isJunkLine(line) {
+  const t = line.toLowerCase();
+  const junkKeywords = [
+    'cheap', 'best', 'rates', 'price', 'check', 'kindly', 
+    'please', 'offer', 'available', 'available?', 'base', 'net','Salam', 'Waalaikum', 'Assalam', 'Hello', 'Hi', 'Dear', 'Respected', 'Greetings','suhoor', 'iftar', 'view', 'kabah', 'haram', 'sharing', 'person','Thank', 'Thanks', 'Regards', 'Best', 'Wishes', 'Hello', 'Hi', 'Dear', 'Respected', 'Greetings'
+  ];
+  return junkKeywords.some(word => t.includes(word));
+}
+
 function extractView(text = '') {
   const t = text.toLowerCase();
   
@@ -250,6 +316,8 @@ function protectDoubleTreeHotel(text = '') {
   return text
     .replace(/\bDBL\s+TREE\b/gi, 'DOUBLETREE')
     .replace(/\bDOUBLE\s+TREE\b/gi, 'DOUBLETREE')
+    .replace(/\bDUBLE\s+TREE\b/gi, 'DOUBLETREE')
+    .replace(/\bTRIPLE\s+ONE\b/gi, 'TRIPLEONE');
 }
 
 // ======================================================
@@ -270,32 +338,33 @@ function isRoomOnlyLine(line = '') {
   if (!t) return true;
 
   // 🛡️ 0. WHITELIST: If it has a Hotel Brand, it is VALID (Return false to keep it)
-  // (Your existing list handles hidayah/miramar/etc)
-  const hotelBrands = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|tower|hotel|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|ghufran|shaza|millennium|copthorne|taiba|front|aram|artal|zn|fundaq|grand|oberoi|miramar|hidayah|hidaya|manar|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/i;
+  // 🛡️ FIX: Added "towers" explicitly to protect plural hotel names
+  const hotelBrands = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|tower|towers|hotel|saif|majd|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|ghufran|shaza|millennium|copthorne|taiba|front|aram|artal|zn|fundaq|grand|oberoi|miramar|hidayah|hidaya|manar|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/i;
   
   // 🚨 CRITICAL FIX: "LAST ASHRA" is a DATE, NEVER a hotel.
   // We check this BEFORE the whitelist so Emaar doesn't save it.
   if (/last\s*ashra|ramadan/i.test(t)) return true;
+  if (/^(hotel\s*(mak|med|makkah|madina|madinah))[:\s-]*/i.test(t)) return true;
 
   if (hotelBrands.test(t)) return false;
 
   // 🛡️ 1. NUMBER START GUARD (Fixes "1 dbl with extra bed")
   // Added: qued
-    if (/^\d/.test(t) && /\b(dbl|double|trp|triple|quad|qued|quint|bed|pax|room|guest|night|sharing|person|persons)\b/i.test(t)) {
+    if (/^\d/.test(t) && /(?:^|\d)(dbl|double|trp|triple|quad|qued|quint|bed|pax|room|guest|night|sharing|person|persons)\b/i.test(t)) {
       return true;
   }
 
   // 2. DATES
   if (/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(t)) return true;
-  if (/check\s*(in|out)|arr|dep|from|to/i.test(t)) return true;
+  
+  // 🚨 FATAL BUG FIX: Added \b word boundaries so "to" doesn't trigger on words like "towers"
+  if (/\b(check\s*(in|out)|arr|dep|from|to)\b/i.test(t)) return true;
 
   // 3. KEYWORD DICTIONARY
   // Added: qued
-  // 3. KEYWORD DICTIONARY
   // Added: person (singular)
-  // 3. KEYWORD DICTIONARY (Updated with new view keywords)
- const roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|person|bed|beds|view|veiw|vew|city|st|street|cty|back|bck|haram|harem|hrm|kaaba|kaba|kbah|partial|part|prtl|side|sd|semi|smi|fl|full|ro|bb|hb|fb|breakfast|extra|sharing)\b/i;
-
+  // Updated with new view keywordsconst 
+  roomLock = /\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|quart|qad|qud|quadr|quint|hex|hexa|suite|room|rooms|persons|person|bed|beds|view|veiw|vew|city|st|street|cty|back|bck|haram|harem|hrm|kaaba|kaba|kbah|partial|part|prtl|side|sd|semi|smi|fl|full|ro|bb|hb|fb|breakfast|extra|sharing|ex|ext|hv|kv|cv|wd|we|sr)\b/i;
   if (t.split(/\s+/).length === 1 && roomLock.test(t)) return true;
 
   const words = t.split(/\s+/);
@@ -343,6 +412,11 @@ function normalizeHotelForAI(hotel = '') {
   // Clean address parts
   if (/^(makkah|madinah|saudi arabia|street|road|district|jabal omar ibrahim al khalil)$/i.test(h)) return null;
 
+  // ============================================================
+  h = h.replace(/\b(double|dbl)\s*tree\b/gi, 'DoubleTree');
+  h = h.replace(/\b(triple|trp)\s*(one|1)\b/gi, 'TripleOne');
+  h = h.replace(/\b(fundaq|fudnaq)\b/gi, '');
+
   // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
   // Added: ashra
   const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra)\b/i;
@@ -354,15 +428,11 @@ function normalizeHotelForAI(hotel = '') {
   if (h.length < 3) return null;
   if (/^hotel$/i.test(h)) return null;
 
-  // 🛡️ 3. BRAND PROTECTION
-  h = h.replace(/\b(double|dbl)\s*tree\b/gi, 'DoubleTree');
-  h = h.replace(/\b(fundaq|fudnaq)\b/gi, '');
-
   // 🛡️ 4. HOTEL KEYWORD LIST
   // Added: hidayah (variations), concord, vision, jiwar, wahba, shourfah, etc.
   // 🛡️ 4. HOTEL KEYWORD LIST
   // Added: hidayah (variations), miramar, ruve, nozol, etc.
-  const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
+  const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|tripleone|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
   // 🛡️ NOISE CLEANER
 // Added: qued
   h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|room|only|bed|breakfast|bb|ro)\b/gi, '').trim();
@@ -400,22 +470,205 @@ async function startBot() {
     if (connection === 'open') console.log('✅ Bot connected')
   })
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0]
-    if (!msg?.message || msg.key.fromMe) return
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg?.message || msg.key.fromMe) return;
 
-    const senderId = msg.key.participant || msg.key.remoteJid
-    if (isEmployee(senderId)) return
+    const senderId = msg.key.participant || msg.key.remoteJid;
+    const groupId = msg.key.remoteJid;
+    const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
 
-    const groupId = msg.key.remoteJid
-    if (!groupId?.endsWith('@g.us')) return
+// ======================================================
+    // 🚀 NEW COMMAND: /send (Forward Quote to Client)
+    // ======================================================
+    if (rawText.toLowerCase().startsWith('/send')) {
+        const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+        const quotedMsg = contextInfo?.quotedMessage?.extendedTextMessage?.text || 
+                          contextInfo?.quotedMessage?.conversation;
+                          
+        // ⚠️ ERROR CHECK: Did they actually reply to a message?
+        if (!quotedMsg) {
+            await sock.sendMessage(groupId, { text: '⚠️ You must *reply* directly to a V2 Shadow Report message to use /send.' }, { quoted: msg });
+            return;
+        }
 
-    const rawText =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      ''
+        // ⚠️ ERROR CHECK: Is it a valid report with a Ref ID?
+        // 🛡️ FIX: Look specifically for "RQ-123" to bypass WhatsApp bold formatting
+        const refMatch = quotedMsg.match(/RQ-(\d+)/);
+        if (!refMatch) {
+            await sock.sendMessage(groupId, { text: '⚠️ Could not find the Ref ID. Make sure you are replying to the full V2 bot report.' }, { quoted: msg });
+            return;
+        }
+
+        const reqId = refMatch[1];
+        const parts = rawText.trim().split(/\s+/);
+        let modifier = 0;
+        
+        // Check for +20 or -20
+        if (parts.length > 1) {
+            modifier = parseInt(parts[1]) || 0; 
+        }
+
+        // Fetch from Database
+        const quoteData = getQuoteByReqId(reqId);
+        
+        if (quoteData) {
+            const quote = JSON.parse(quoteData.full_json);
+            const { buildClientMessage } = require('./v2/formatter');
+            const finalMsg = buildClientMessage(quote, modifier);
+            
+            // 🛡️ Build the perfect Baileys Quote Object for WhatsApp Web Compatibility
+            const originalMessageQuote = {
+                key: {
+                    remoteJid: quoteData.client_group_id,
+                    fromMe: false,                               // 👈 Required for WA Web
+                    id: quoteData.client_msg_id,
+                    participant: quoteData.client_participant    // 👈 Required for Group Replies
+                },
+                message: { 
+                    conversation: quoteData.original_text || "Booking Request" 
+                }
+            };
+
+            // 📤 Send directly to the client group AS A REPLY to their original query!
+            await sock.sendMessage(quoteData.client_group_id, { 
+                text: finalMsg 
+            }, { 
+                quoted: originalMessageQuote 
+            });
+            
+            // ✅ Confirm success to the owner
+            await sock.sendMessage(groupId, { 
+                text: `✅ Sent to client successfully!\n📍 Group: ${quoteData.client_group_id}\n💰 Adjustment: ${modifier > 0 ? '+' : ''}${modifier} SAR/night` 
+            }, { quoted: msg });
+            
+        } else {
+            await sock.sendMessage(groupId, { text: '❌ Could not find this quote in the database.' }, { quoted: msg });
+        }
+        
+        return; // 🛑 Stop processing so it doesn't fall down into IGNORE or CLIENT_QUERY
+    }
+
+    // ======================================================
+    // 🕵️ ROLE ASSIGNMENT & ROUTING
+    // ======================================================
+    // ... your standard role checking (isOwner, isVendor, etc.) continues here ...
+    // ======================================================
+    // 🚀 NEW COMMAND: /send (Forward Quote to Client)
+    // ======================================================
+    if (rawText.toLowerCase().startsWith('/send')) {
+        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text || 
+                          msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation;
+                          
+        if (quotedMsg) {
+            const refMatch = quotedMsg.match(/Ref:\s*RQ-(\d+)/);
+            if (refMatch) {
+                const reqId = refMatch[1];
+                const parts = rawText.split(' ');
+                let modifier = 0;
+                
+                // Parse optional modifier like /send +20 or /send -20
+                if (parts.length > 1) {
+                    modifier = parseInt(parts[1]) || 0; 
+                }
+
+                const quoteData = db.getQuoteByReqId(reqId);
+                if (quoteData) {
+                    const quote = JSON.parse(quoteData.full_json);
+                    const { buildClientMessage } = require('./v2/formatter');
+                    const finalMsg = buildClientMessage(quote, modifier);
+                    
+                    // Reply directly to the original message in the client group
+                    await sock.sendMessage(quoteData.client_group_id, { 
+                        text: finalMsg 
+                    }, { 
+                        quoted: { 
+                            key: { 
+                                remoteJid: quoteData.client_group_id, 
+                                id: quoteData.client_msg_id 
+                            }, 
+                            message: { conversation: "Original Query" } 
+                        } 
+                    });
+                    
+                    // Confirm in Owner Group
+                    await sock.sendMessage(groupId, { text: `✅ Sent to client successfully! (Adjustment: ${modifier > 0 ? '+' : ''}${modifier} SAR/night)` }, { quoted: msg });
+                } else {
+                    await sock.sendMessage(groupId, { text: '❌ Could not find this quote in the database.' }, { quoted: msg });
+                }
+                return; // Stop processing this message further
+            }
+        }
+    }
+    // ============================================================
+    // 👤 PRIVATE MESSAGE AUTO-REPLY
+    // ============================================================
+    // If it is NOT a group message (doesn't end in @g.us), it's a DM.
+    if (!groupId?.endsWith('@g.us')) {
+        // Only reply if they actually sent some text, to avoid spamming system events
+        if (rawText.trim()) {
+            const autoReply = `*Salam! 👋*
+
+Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
+
+*🤖 Main Kaisay Kaam Karta Hoon:*
+Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
+
+*⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
+
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali ( +923326873756 )
+• *Bot Details/Bug Reports:* Developer, Azlan Ali ( +923162724750 )
+
+*(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
+
+---
+
+*Salam! 👋*
+
+I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
+
+*🤖 How I Work:*
+When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
+
+*⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
+
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali ( +923326873756 )
+• *Bot Info/Bug Reports:* Developer, Azlan Ali ( +923162724750 )
+
+*(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
+
+            await sock.sendMessage(groupId, { text: autoReply });
+        }
+        return; // Stop processing so it doesn't trigger the rest of the bot
+    }
 
     if (!rawText.trim()) return
+
+    // ============================================================
+    // 🛑 TRANSPORT & CAB BOOKING FILTER
+    // ============================================================
+    // If the message contains these specific transport keywords, ignore it completely.
+    const isTransport = /\b(car\s*type|sector\s*[:\-]|time\s*of\s*pickup|ticket\s*detail|lead\s*pax\s*name)\b/i.test(rawText);
+    if (isTransport) {
+        console.log("🚕 Transport/Cab booking detected. Ignoring.");
+        return; // Stops the bot from processing this message
+    }
+
+    const role = getGroupRole(groupId);
+
+    // ============================================================
+    // 👑 COMMAND MODE: OWNER OVERRIDE (Bypasses Employee Check)
+    // ============================================================
+    // If the message is in the Owner group and starts with /bot del, let it through!
+    if (role === 'OWNER' && rawText.trim().toLowerCase().startsWith('/bot del')) {
+        await handleOwnerDeleteCommand(sock, msg, rawText.trim());
+        return; 
+    }
+
+    // Now it is safe to block employees from sending normal hotel queries
+    if (isEmployee(senderId)) return 
 
     // 🧠 CONVERSATIONAL REPAIR (Fixed)
     const { getPendingQuestion, clearPendingQuestion } = require('./queryStore');
@@ -437,7 +690,6 @@ async function startBot() {
         clearPendingQuestion(groupId);
     }
 
-    const role = getGroupRole(groupId)
     // ✅ PASS 'msg' SO CLASSIFIER CAN CHECK DATABASE
     const type = classifyMessage({ groupRole: role, text: finalProcessingText, msg: msg })
     const universalTypes = extractRoomTypesFromText(finalProcessingText);
@@ -455,22 +707,42 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       // ============================================================
     // ✅ STEP A: Fix Typos & Normalize
       let preProcessedText = finalProcessingText
+        .replace(/(\d+)([a-zA-Z]+)/g, '$1 $2') // 👈 NEW: Turns "2trp" into "2 trp" and "3dbl" into "3 dbl"
         .replace(/\bcheck\s*inn\b/gi, 'check in') 
-        .replace(/\b(inn|out)\s*:\s*/gi, ' ')     
+        .replace(/\bmeridian\b/gi, 'meridien') // 👈 THE TYPO FIX
+        
+        // 🛡️ FIX: Keep the words "in" and "out" but remove colons so dates anchor properly
+        .replace(/\b(in|out|inn|date|arr|dep|from|to)\s*:\s*/gi, '$1 ')     
         .replace(/\b(guest|name)\s*:\s*/gi, 'guest ')
-// 🛡️ FIX 4: CHATTER CLEANER
-        .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|check|price|prices|amount|cost)\b/gi, ' ')
+
+        // 🛡️ FIX 4: CHATTER CLEANER (Removed 'check' so date anchors survive)
+        .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|price|prices|amount|cost)\b/gi, ' ')
+        
+        // 🛡️ FIX 4.5: KILL "HOTEL MAK:" LABELS (Prevents them from becoming orphan hotels)
+        .replace(/\bhotel\s*(mak|med|makkah|madina|madinah)\s*[:\-]?\s*/gi, '\n')
         
         // 🛡️ FIX: KILL ZIP CODES (Prevents "Swiss 21955" from being deleted later)
         .replace(/\b\d{5}\b/g, ' ') 
         
         // 🛡️ FIX: KILL GENERIC TERMS (Prevents "Fundaq" from being seen as a hotel)
         .replace(/\b(fundaq|fudnaq)\b/gi, ' ')
-                // Fix "1st of March"
+        
         // Standardize to "LAST ASHRA" so the AI recognizes it easily
         .replace(/\b(last\s*ashra|last\s*10\s*days\s*of\s*ramadan|last\s*ashrah)\b/gi, 'LAST ASHRA')
+        
+        // Fix "1st of March" -> "1 March"
         .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
         .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
+
+        // Fix "1st of March" -> "1 March"
+        .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
+        .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
+
+        // 🛡️ FIX 27: COMPRESSED DATE NORMALIZER (e.g. 28mar-04apr -> 28 mar to 04 apr)
+        .replace(/(\d{1,2})(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
+        .replace(/(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\s*-\s*(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, '$1 to $2')
+
+        // 🛡️ FIX 26: HYPHEN DATE NORMALIZER
 
         // 🛡️ FIX 26: HYPHEN DATE NORMALIZER
         .replace(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-]*(\d{2})\b/gi, '$1 $2 20$3')
@@ -487,17 +759,19 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           '$1 to $2 $3'
       );
 
-// 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
+      // 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
       // REMOVED: manar, madinah, khalil (to protect "Emaar Al Manar", "Anwar Madinah")
       // KEPT: hidayah, miramar, concord, vision (Stand-alone names)
       const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|oberoi|miramar|hidayah|hidaya|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/gi;
       preProcessedText = preProcessedText.replace(brandsRegex, '\n$1');
-// 🛡️ FIX 8: THE EXPLODER
-        preProcessedText = preProcessedText.replace(
+
+      // 🛡️ FIX 8: THE EXPLODER
+      preProcessedText = preProcessedText.replace(
           /(?<!\bto\s*)(?<!-\s*)(?<!\bfrom\s*)(\b\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, 
           '\n$1 '
       );
-        preProcessedText = preProcessedText.replace(
+      
+      preProcessedText = preProcessedText.replace(
           /(\b\d+\s*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|qued|quint|suite))/gi,
           '\n$1'
       );
@@ -555,7 +829,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           let isDateLine = /^(?:check\s*in|chk\s*in|arr|from|arriving|check\s*out|chk\s*out|dep|to|in|out|leaving)[:\s-]*(\d.*)/i.exec(line);
           
           if (!isDateLine) {
-              const pureDate = /^(\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i.exec(line);
+            const pureDate = /^(\d{1,2}(?:st|nd|rd|th)?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec).*)/i.exec(line);
               if (pureDate) isDateLine = [line, pureDate[1]]; 
           }
           
@@ -883,25 +1157,104 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         
         if (splitHotels.length > LIMITS.MAX_HOTELS) splitHotels = splitHotels.slice(0, LIMITS.MAX_HOTELS);
         
-        // 🛡️ DEDUPLICATION FIX: Ensure we don't process same sanitized hotel twice
-        let sanitizedHotels = splitHotels.map(h => sanitizedMap[h] || h);
+
+        // 1. Split BOTH the cleaned text and the original text into lines
+        const cleanedLines = preProcessedText.split('\n').map(l => l.trim());
+        const originalLines = rawText.split('\n').map(l => l.trim());
+
+        const potentialHotels = [];
+        
+        // 🛡️ BRAND GLUE: List of brands that should "grab" the next line if they are alone
+        const splitBrands = /emaar|pullman|swiss|voco|fairmont|hilton|movenpick|meridien|clock|royal|zamzam/i;
+
+        for (let i = 0; i < cleanedLines.length; i++) {
+            let line = cleanedLines[i];
+            if (!line || line.length < 3) continue;
+
+            const originalLine = originalLines[i] || line;
+            
+            // 🔗 THE GLUE LOGIC: If 'Emaar' is on one line and 'Royal' on next, combine them
+            const isSingleWord = line.split(/\s+/).length === 1;
+            if (isSingleWord && splitBrands.test(line) && i + 1 < cleanedLines.length) {
+                const nextLine = cleanedLines[i + 1];
+                // Only glue if next line isn't a date, room, or meal
+                const isDataLine = isRoomOnlyLine(nextLine) || 
+                                   nextLine.match(/\d{1,2}\s*(?:jan|feb|mar)/i) ||
+                                   /view|suhoor|iftar/i.test(nextLine);
+                                   
+                if (!isDataLine) {
+                    line = `${line} ${nextLine}`;
+                    i++; // Skip the next line in the next iteration
+                }
+            }
+
+            const isJunk = isJunkLine(line);
+            const isRoom = isRoomOnlyLine(line);
+            const isDate = line.match(/\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i);
+            
+            // 🛡️ THE ATTRIBUTE SHIELD: Prevents 'Suhoor' or 'View' from being hotels
+            const isAttribute = /view|kabah|haram|iftar|suhoor|breakfast|half|board|meal|sharing/i.test(line);
+
+            // 🛡️ RESCUE RULES: Look at original line for keywords like 'Fundaq'
+            const hasHotelKeyword = /hotel|fundaq|fandaq|dar|tower|inn|suites|stay|voco|answar/i.test(originalLine) || splitBrands.test(line);
+            const isValidPhrase = line.split(/\s+/).filter(w => w.length > 2).length >= 2;
+
+            if (!isJunk && !isRoom && !isDate && !isAttribute) {
+                if (hasHotelKeyword || isValidPhrase) {
+                    potentialHotels.push(line);
+                }
+            }
+        }
+
+        // --- SANITIZATION & LOOP ---
+
+        let rawSanitizedResults = await sanitizeHotelNames(potentialHotels);
+        
+        // 🛡️ THE CRASH FIX: Initialize these BEFORE the loop starts!
+        let sanitizedHotels = [];
+        const finalSanitizedMap = {}; 
+
+        potentialHotels.forEach((raw, index) => {
+            const matchedName = rawSanitizedResults[index];
+            
+            // Search the ORIGINAL text lines to find stripped keywords
+            const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;
+            const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah/i.test(originalLine);
+            
+            // Validation Gate Logic: Keep if DB match OR strong keyword
+            if (matchedName || (hasStrongKeyword && raw.length > 3)) {
+                const finalName = matchedName || raw; 
+                sanitizedHotels.push(finalName);
+                finalSanitizedMap[raw] = finalName;
+            } else {
+                console.log(`🗑️ Dropping non-hotel junk: "${raw}"`);
+            }
+        });
+
+        // 2. Remove Duplicates & Maintain "Again/Same" logic
         sanitizedHotels = [...new Set(sanitizedHotels)];
 
         const isAgain = rawText.toUpperCase().includes('AGAIN') || rawText.toUpperCase().includes('SAME');
-        if ((splitHotels.length === 0 || (splitHotels.length === 1 && /AGAIN|SAME/i.test(splitHotels[0]))) && isAgain) {
-           if (lastKnownHotels.length > 0) splitHotels = lastKnownHotels;
+        if ((sanitizedHotels.length === 0 || (sanitizedHotels.length === 1 && /AGAIN|SAME/i.test(sanitizedHotels[0]))) && isAgain) {
+           if (lastKnownHotels.length > 0) sanitizedHotels = lastKnownHotels;
         } else {
-           const validNow = splitHotels.map(h => normalizeHotelForAI(h)).filter(Boolean);
+           const validNow = sanitizedHotels.map(h => normalizeHotelForAI(h)).filter(Boolean);
            if (validNow.length > 0) lastKnownHotels = validNow;
         }
 
+        // 3. Process the Loop
         for (const hotelName of sanitizedHotels) {
           if (limitReached) break blockLoop;
 
           const hotel = normalizeHotelForAI(hotelName);
           if (!hotel) continue;
 
-          const fullLine = effectiveText.split('\n').find(l => l.toLowerCase().includes(hotelName.toLowerCase())) || hotelName;
+          // 🛡️ Use our cleaned finalSanitizedMap to find what the user actually typed
+          const rawNameInText = Object.keys(finalSanitizedMap).find(key => finalSanitizedMap[key] === hotelName) || hotelName;
+
+          // Now we search the text using the raw name, not the clean one!
+          const fullLine = effectiveText.split('\n').find(l => l.toLowerCase().includes(rawNameInText.toLowerCase())) || rawNameInText;
+          
           let activeTypes = extractRoomTypesFromText(fullLine);
           if (activeTypes.length === 0) activeTypes = universalTypes;
           
@@ -910,33 +1263,27 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           const mealHint = extractMeal(effectiveText);
           const viewHint = extractView(effectiveText);
 
-          // 🛡️ FIX: Combine Block Dates + Global Dates
-          // This ensures the AI sees "20 Feb - 01 Mar" even if the segmenter put Kiswa in the wrong block.
-// 🛡️ FIX: Combine Block Dates + Global Dates
-          const allContextDates = [...new Set([...blockDateList, ...globalDateRanges])];
-
-
-// 🛡️ SMART CONTEXT PROMPT
-          const aiInput = protectDoubleTreeHotel([
-              `TARGET_HOTEL: ${hotel}`,
-              `AVAILABLE_DATES: ${allContextDates.join(', ')}`, 
-              `FULL_MESSAGE_CONTEXT: ${effectiveText}`, 
-              `DEFAULT_ROOMS: ${activeTypes.join(' ')}`,
-              `MEAL_HINT: ${mealHint}`,
-              `VIEW_HINT: ${viewHint}`,
+          const allContextDates = [...new Set([...blockDateList, ...globalDateRanges])];          
+          // ... rest of your AI call logic ...// 🛡️ SMART CONTEXT PROMPT
+const aiInput = protectDoubleTreeHotel([
+              `### TARGET HOTEL: ${hotel} (Identified in text as "${rawNameInText}")`,
+              `### MESSAGE CONTEXT: \n${effectiveText}`, 
+              `### DEFAULTS: Meal=${mealHint}, View=${viewHint}, Rooms=1`,
               
-              `--- LOGIC RULES ---`,
-              `1. GRAVITY RULE: Dates usually appear BELOW the hotel name.`,
-              `   - Exception: If a date is at the very TOP (Header), it applies to all hotels below it until a new date appears.`,
-              `2. BARRIER RULE: A date line acts as a WALL.`,
-              `   - "Hotel A... Date 1... Hotel B" -> Hotel B CANNOT take Date 1. It must find a date below it.`,
-              `3. LAZY DATES: "15 20 mar" means "15 Mar to 20 Mar".`,
-              `4. NIGHTS CALCULATION: "3 nights" starting "19 Feb" -> Check-out 22 Feb.`,
-              `5. EXTRACT PAX: "6 person" -> "persons": 6.`,
-              `6. STRICT VIEW: DO NOT infer views unless EXPLICITLY written.`,
-              `STRICT: Return JSON only.`
+              `--- EXTRACTION PROTOCOL (DO NOT IGNORE) ---`,
+              `1. THE ADJACENCY RULE: Usually, a hotel's date is IMMEDIATELY ABOVE or BELOW its name.`,
+              `2. MULTIPLE DATE OPTIONS: If the text lists multiple alternative dates for this hotel, you MUST create a SEPARATE query object in your array for EACH date range!`,
+              `3. THE "STEALING" TRAP: Never give Date A to Hotel B if they are separated by another hotel's name.`,
+              `4. THE BARRIER RULE: Another hotel's name is a WALL. You cannot "jump over" it to find a date.`,
+              `5. LIST / HEADER EXCEPTION (OVERRIDES BARRIER RULE): If there is a date at the top and a list of hotels below it (e.g., 1. Hotel A, 2. Hotel B), apply that top date to ALL hotels in the list!`,
+              `6. DATE MATH & FORMATS: "15 20 mar" = Check-in 15 Mar, Check-out 20 Mar.`,
+              `7. PAX & ROOM LOGIC: If text says "6 persons", use 6. OTHERWISE: Triple = 3, Quad = 4, Double/Twin = 2.`,
+              `8. MEALS & VIEWS: Use the hints (${mealHint}/${viewHint}) as defaults. ONLY change them if the text explicitly says otherwise.`,
+              `9. ISOLATION: Return data for "${hotel}" ONLY.`,
+              
+              `STRICT OUTPUT: Return ONLY a JSON object with the 'queries' array.`
           ].join('\n'));
-          
+
           let ai;
           try { 
               ai = await parseClientMessageWithAI(aiInput); 
@@ -1078,7 +1425,9 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
                    check_out: q.check_out,
                    room_type: q.room_type,
                    rooms: q.rooms,
-                   persons: q.persons
+                   persons: q.persons,
+                   meal: q.meal || '',
+                   view: q.view || ''
                });
                
                // Attach ID to the object so we can use it later when sending to vendors
@@ -1125,7 +1474,6 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
         return;
       }
 
-// 🛡️ FINAL DEDUPLICATION (Fixes "Hilton" vs "Hilton Makkah")
 // ============================================================
       // 🛡️ 4. FINAL DEDUPLICATION (The "Simple Rule")
       // ============================================================
@@ -1136,22 +1484,22 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
 
       for (const q of allQueries) {
           // 1. Normalize Hotel Name for Comparison ONLY
-          // This ensures "Kiswa" and "Kiswa Towers" count as the SAME hotel.
           const cleanName = (sanitizedMap[q.hotel] || q.hotel).toLowerCase()
               .replace(/\b(makkah|madinah|hotel|hotels|convention|towers|tower|jabal|omar|al|residence|suites|inn|view|guest|house)\b/gi, '')
               .replace(/[^a-z0-9]/g, '') // Remove symbols
               .trim();
 
           // 2. Create the Signature
-          // format: "kiswa|2026-02-18|2026-02-20|quad"
           const signature = `${cleanName}|${q.check_in}|${q.check_out}|${q.room_type}`;
 
-          // 3. Check & Push
+          // 3. Check & Push (FIXED LOGIC)
+          // Only push to uniqueQueries if we have NOT seen this signature yet
           if (!seenSignatures.has(signature)) {
               seenSignatures.add(signature);
               uniqueQueries.push(q);
           } else {
-              console.log(`🗑️ Duplicate Removed: ${q.hotel} (${q.check_in}) - Signature matched.`);
+              // It's a duplicate, ignore it.
+              console.log(`🗑️ Duplicate Skipped: ${q.hotel} (${q.check_in})`);
           }
       }
       
@@ -1289,7 +1637,7 @@ if (selectedVendors.length > 0) {
               }
               
               // 🔒 LOCK THIS VENDOR
-              usedVendorsForThisDate.add(vg); 
+              //usedVendorsForThisDate.add(vg); 
               
               await sleep(VENDOR_SEND_DELAY_MS);
           }
@@ -1304,15 +1652,13 @@ if (selectedVendors.length > 0) {
       // ======================================================
     // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
     // ======================================================
-// ======================================================
-    // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
-    // ======================================================
     if (role === 'VENDOR' && type === 'VENDOR_REPLY') {
       
       let context = null;
       const ctx = msg.message.extendedTextMessage?.contextInfo;
 
       if (ctx?.stanzaId) {
+          // 🛡️ Fetches full context including the 'meal' column we added to the SELECT
           context = getContextBySentMsgId(ctx.stanzaId);
       }
 
@@ -1327,12 +1673,9 @@ if (selectedVendors.length > 0) {
           // ============================================================
           // 🕵️ DETECT HOTEL CHANGE (The "Le Meridien" Fix)
           // ============================================================
-          // Logic: Run the reply text through the sanitizer. 
-          // If a VALID hotel is found, override the requested hotel.
+          let actualHotel = context.requested_hotel; 
           
-          let actualHotel = context.requested_hotel; // Default to what we asked for
-          
-          // 1. Clean the reply lines (remove dates/prices to find names)
+          // 1. Clean the reply lines to find potential names
           const potentialLines = rawText.split('\n')
               .map(l => l.trim())
               .filter(l => l.length > 3 && !isRoomOnlyLine(l) && !/^\d+/.test(l));
@@ -1342,9 +1685,26 @@ if (selectedVendors.length > 0) {
               
               // 2. Run Sanitizer
               const sanitizedCandidates = await sanitizeHotelNames(potentialLines);
+              let newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
               
-              // 3. Pick the first valid hotel that isn't a command
-              const newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
+            // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
+            if (!newHotel) {
+                const firstLine = potentialLines[0];
+                
+                // Check if the line looks like a price or room type (e.g., contains slashes or "dbl/trp/ro")
+                const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine);
+                const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
+                const isVendorJunk = /booked|sold|out|stop|sale|unavailable/i.test(firstLine);
+                
+                if (!isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
+                    newHotel = firstLine; 
+                    console.log(`⛑️ Vendor Hotel Rescued (Raw Text): "${newHotel}"`);
+                } else {
+                    console.log(`🚫 Rescue Skipped: Line "${firstLine}" looks like a price or room code.`);
+                    // Fallback to the hotel name we originally asked for
+                    newHotel = context.requested_hotel;
+                }
+            }
               
               if (newHotel) {
                   console.log(`🔄 Hotel Override Detected: "${actualHotel}" -> "${newHotel}"`);
@@ -1352,26 +1712,26 @@ if (selectedVendors.length > 0) {
               }
           }
 
-          // 🛡️ SMART VIEW DETECTION (Handles typos & partials)
-          let detectedView = extractView(rawText); // Run the vendor text through the new helper
-          
-          // Fallback: If vendor didn't mention a view, keep the original client request
+          // 🛡️ SMART VIEW DETECTION
+          let detectedView = extractView(rawText); 
           if (!detectedView) {
               detectedView = context.view || "CITY VIEW";
           }
 
           // ============================================================
-          // 🧮 PREPARE CALCULATOR
+          // 🧮 PREPARE CALCULATOR (WITH MEAL FIX)
           // ============================================================
           const queryData = {
-              hotel: actualHotel, // Use the detected hotel
+              hotel: actualHotel,
               check_in: context.check_in,
               check_out: context.check_out,
               room_type: context.room_type,
               rooms: context.rooms,
               persons: context.persons,
               db_child_id: context.child_id,
-              view: detectedView
+              view: detectedView,
+              // 🛡️ THE CRITICAL FIX: Explicitly pass the meal from DB context to the calculator
+              meal: context.meal || "" 
           };
           
           console.log(`🧪 V2: Calculation started for ${queryData.hotel}...`);
@@ -1384,17 +1744,17 @@ if (selectedVendors.length > 0) {
                   request_id: context.request_id,
                   raw_reply_text: rawText,
                   quoted_price: v2Quote.total_price || 0,
-                  vendor_hotel_name: actualHotel, // Save "Le Meridien"
+                  vendor_hotel_name: actualHotel,
                   is_match: 1, 
                   full_json: JSON.stringify(v2Quote)
               });
               
-              // 2. UPDATE STATUS (Mark as REPLIED)
+              // 2. UPDATE STATUS
               updateRequestStatus(context.request_id, 'REPLIED');
               console.log(`💾 DB: Saved Quote & Updated Status to REPLIED`);
 
               // 3. SEND TO OWNER
-              const report = formatForOwner(v2Quote);
+              const report = formatForOwner(v2Quote, context.request_id);
               const owners = getOwnerGroups();
               for (const ownerGroupId of owners) {
                   await sock.sendMessage(ownerGroupId, { text: report });
