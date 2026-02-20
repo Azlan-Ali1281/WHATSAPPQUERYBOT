@@ -45,11 +45,11 @@ const {
 // 🛡️ SAFETY LIMITS (Circuit Breaker)
 // ======================================================
 const LIMITS = {
-  MAX_TOTAL_REQUESTS: 600, // Hard cap: No more than 15 vendor msgs per user msg
-  MAX_DATE_RANGES: 300,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
-  MAX_HOTELS: 400,          // Max distinct hotels per query
-  MAX_ROOM_TYPES: 100,       // Max distinct room types per hotel
-  MAX_VENDORS_PER_HOTEL: 600 // 🛡️ NEW: How many vendors get the blast?
+  MAX_TOTAL_REQUESTS: 6, // Hard cap: No more than 15 vendor msgs per user msg
+  MAX_DATE_RANGES: 3,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
+  MAX_HOTELS: 4,          // Max distinct hotels per query
+  MAX_ROOM_TYPES: 2,       // Max distinct room types per hotel
+  MAX_VENDORS_PER_HOTEL: 6 // 🛡️ NEW: How many vendors get the blast?
 };
 
 const {
