@@ -12,9 +12,9 @@ const OFFICIAL_REGISTRY = [
   "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower",
   "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Iman InterContinental", 
   "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", 
-  "Leader Al Muna Kareem", "Odst Al Madinah", "Artal Al Munawara", "Zowar International", 
+  "Leader Al Muna Kareem", "Odst Al Madinah", "Artal International", "Zowar International", 
   "Taiba Front", "Aqeeq Madinah", "Frontel Al Harithia", "Dallah Taibah", 
-  "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Province Al Sham",
+  "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Sky View","Province Al Sham", "Taif Al Nebras" ,
   "Gulnar Taiba", "Emaar Al Manar","Frontel Al Harithia",
   
   // 🕋 MAKKAH (Clock Tower)

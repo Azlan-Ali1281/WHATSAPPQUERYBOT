@@ -246,6 +246,7 @@ module.exports = {
     },
 
     logVendorRequest: (data) => logRequest.run(data).lastInsertRowid,
+    db,
     
     getContextBySentMsgId: (msgId) => {
         const row = getContextQuery.get(msgId);

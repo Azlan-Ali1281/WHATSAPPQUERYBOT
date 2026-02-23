@@ -1,31 +1,42 @@
 // src/v2/markupEngine.js
-const { getDatabase } = require('../database');
+
+// 🛡️ DEFAULT FALLBACK TIERS (Before you send a WhatsApp command)
+let activeTiers = [
+    { threshold: 500, margin: 20 },
+    { threshold: 1000, margin: 40 },
+    { threshold: Infinity, margin: 60 }
+];
 
 /**
- * 💰 THE PROFIT ENGINE
- * Applied to the total net nightly rate (Base + View + Extra Bed + Meal)
+ * 🧮 Calculates the profit markup based on the net room rate
  */
-function getMarkup(clientCode = 'DEFAULT', netNightlyPrice) {
-    const db = getDatabase();
+function getMarkup(clientCode, netDailyTotal) {
+    // Note: If you have special logic for 'clientCode' (like VIPs), you can keep it here!
     
-    // We fetch the rule that fits the price tier
-    const rule = db.prepare(`
-        SELECT * FROM markup_rules 
-        WHERE client_code = ?
-        AND ? >= min_price AND ? < max_price
-        LIMIT 1
-    `).get(clientCode, netNightlyPrice, netNightlyPrice);
-
-    if (!rule) {
-        // Fallback safety: if DB lookup fails, apply the logic manually
-        return netNightlyPrice >= 1000 ? 40 : 20;
-    }
-
-    if (rule.markup_type === 'PERCENT') {
-        return Math.round(netNightlyPrice * (rule.markup_amount / 100));
+    // Find the first tier where the net cost is less than or equal to the threshold
+    for (const tier of activeTiers) {
+        if (netDailyTotal <= tier.threshold) {
+            return tier.margin;
+        }
     }
     
-    return rule.markup_amount;
+    // Safety fallback
+    return activeTiers[activeTiers.length - 1].margin;
 }
 
-module.exports = { getMarkup };
+/**
+ * 🔄 Updates the active tiers dynamically from WhatsApp
+ */
+function updateTiers(newTiers) {
+    // Sort them from lowest threshold to highest to ensure the math always works
+    activeTiers = newTiers.sort((a, b) => a.threshold - b.threshold);
+}
+
+/**
+ * 📊 Returns the current rules for the WhatsApp confirmation message
+ */
+function getCurrentTiers() {
+    return activeTiers;
+}
+
+module.exports = { getMarkup, updateTiers, getCurrentTiers };

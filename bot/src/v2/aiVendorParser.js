@@ -11,8 +11,12 @@ async function parseVendorMessageWithAI(text, childQuery = {}) {
 
   const reqIn = childQuery.check_in || "Unknown";
   const reqOut = childQuery.check_out || "Unknown";
+  // 🛡️ THE FIX: Grab the requested room type so the AI can compare it!
+  const reqRoom = childQuery.room_type || "Unknown";
+  // 🛡️ THE FIX 1: Grab the requested meal so we can pass it to the AI!
+  const reqMeal = childQuery.meal || "RO";
 
-  const systemPrompt = `
+const systemPrompt = `
     You are a Senior Hotel Rate Analyst for Makkah & Madinah markets.
     Your job is to extract PRICING DATA from highly compressed vendor messages.
 
@@ -29,62 +33,68 @@ async function parseVendorMessageWithAI(text, childQuery = {}) {
     
     ### 🧠 CORE LOGIC RULES (MUST FOLLOW):
 
-1. **💰 THE SLASH & MAGNITUDE RULE (STRICT):**
-       - If the vendor provides TWO base numbers (e.g., "400/500" or "400-500"):
-         - You **MUST NOT** use the type "BASE".
-         - You **MUST** create two separate objects in 'split_rates'.
-         - The HIGHER number (500) **MUST** be type: "WEEKEND".
-         - The LOWER number (400) **MUST** be type: "WEEKDAY".
-       - If there is only ONE number (e.g., "500"), use type: "BASE".
-       - If there is a THIRD much lower number (e.g., "400/500/150"), the 150 is "extra_bed_price".
+    1. **💰 WEEKEND SURCHARGES & MATH (CRITICAL):**
+       - If a vendor says "950 weekend extra 100" or "950 w.e extra 100":
+         - This means WEEKDAY is 950.
+         - WEEKEND is 950 + 100 = 1050.
+         - You MUST do the math and create TWO objects in 'split_rates': one for WEEKDAY (950) and one for WEEKEND (1050).
+         - DO NOT confuse "weekend extra" with "extra bed_price".
 
-    2. **🔤 ABBREVIATIONS & KEYWORDS:**
+    2. **💰 THE SLASH & MAGNITUDE RULE (SMART DETECTION):**
+       - If the vendor provides TWO numbers separated by a slash or dash (e.g., "400/500" or "120/20"):
+         - **STEP A (Check for Extra Bed):** Compare the two numbers. If the second number is significantly smaller (e.g., it is less than 40% of the first number, like 120/20 or 900/150):
+           - The first number (120) is the "BASE" rate.
+           - The second number (20) is the "extra_bed_price".
+           - DO NOT create split_rates for this; just return one "BASE" rate.
+         - **STEP B (Check for Weekend/Weekday):** If the numbers are closer in value (e.g., 400/500 or 950/1050):
+           - You MUST create two separate objects in 'split_rates'.
+           - The HIGHER number (500) MUST be type: "WEEKEND".
+           - The LOWER number (400) MUST be type: "WEEKDAY".
+       - If there is only ONE number (e.g., "500"), use type: "BASE".
+       - If there is a THIRD much lower number (e.g., "400/500/150"), the 150 is always "extra_bed_price".
+
+    3. **🔤 ABBREVIATIONS & KEYWORDS:**
        - "W.D" or "WD" = WEEKDAY Rate.
        - "W.E" or "WE" = WEEKEND Rate.
-       - "ex", "ext", "extra", "+", "x" = EXTRA BED price.
-       - If text says "Flat", "Till Quad", or "Same Rate", extra_bed_price = 0.
+       - "ex bed", "ext bed", "extra bed", "+ bed" = EXTRA BED price.
+       - "ex 120" usually means extra bed. Look at context to separate it from "weekend extra".
 
-    3. **🏙️ VIEW SURCHARGES:**
+    4. **🏙️ VIEW SURCHARGES:**
       - Look for keywords: "HV", "Haram", "Kaaba", "KV", "CV", "City".
-      - If you see "HV 150" or "Haram 150" or "Haram View 150", you MUST set "haram": 150.
-      - If you see "KV 200" or "Kaaba 200", you MUST set "kaaba": 200.
-      - Do not ignore these if they are written on the same line as prices.
+      - If you see "HV 150" or "Haram 150", set "haram": 150.
+      - If you see "KV 200" or "Kaaba 200", set "kaaba": 200.
 
-    4. **🍽️ MEAL PLANS & ADD-ONS (CRITICAL LOGIC):**
+    5. **🍽️ MEAL PLANS & ADD-ONS (CRITICAL LOGIC):**
+       - The client requested: ${reqMeal}.
        - Identify the meal included in the BASE RATE ("base_meal_plan").
-         - "dbl cls ro @670" -> base_meal_plan: "RO".
-         - "dbl bb 500" -> base_meal_plan: "BB".
+       - "dbl cls ro @670" -> base_meal_plan: "RO".
+       - IF THE VENDOR DOES NOT MENTION ANY MEAL: Assume the vendor is quoting for the client's requested meal. Set "base_meal_plan" to "${reqMeal}".
        - If there is an OPTIONAL add-on cost for meals (e.g., "bb @25"), set "meal_price_per_pax": 25.
-       - DO NOT set base_meal_plan to "BB" if the base rate is "RO" and BB is just an add-on.
 
-    5. **🛏️ VENDOR BASE ROOM CAPACITY:**
-       - Look at the room type the VENDOR quoted (e.g., "dbl", "trp", "quad").
-       - "sgl" or "single" -> 1
-       - "dbl" or "double" -> 2
-       - "trp" or "triple" -> 3
-       - "quad" -> 4
-       - "quint" -> 5
-       - If not specified, default to 2.
+    6. **🛏️ VENDOR BASE ROOM CAPACITY:**
+       - "sgl" -> 1 | "dbl" or "twin" -> 2 | "trp" -> 3 | "quad" -> 4 | "quint" -> 5
+       - Default to 2 if missing.
 
-    ### 📝 EXAMPLES FOR TRAINING:
-    - Input: "dbl ro 670 ex 100 bb @ 25" 
-      -> split_rates: [{type:'BASE', rate:670}], base_meal_plan: "RO", extra_bed_price: 100, meal_price_per_pax: 25, quoted_base_capacity: 2
-      
-    - Input: "till 24 ava 550/650 ex 100" (Assuming context is Feb 20 to Feb 28)
-      -> split_rates: [{ dates: "2026-02-20 to 2026-02-24", type:'WEEKDAY', rate:550}, { dates: "2026-02-20 to 2026-02-24", type:'WEEKEND', rate:650}]
+    7. **### ROOM TYPE MISMATCH (CRITICAL RULE):**
+        - The client requested: ${reqRoom}.
+        - If the vendor explicitly offers a DIFFERENT room type, extract it into "offered_room_type".
+        - Leave empty if no room is mentioned.
 
     ### 📤 OUTPUT JSON FORMAT (Strict JSON Only):
     {
+      "is_valid": true,
+      "offered_room_type": "",
       "split_rates": [
         { 
-          "dates": "YYYY-MM-DD to YYYY-MM-DD", // EXACT FORMAT or null
+          "dates": "YYYY-MM-DD to YYYY-MM-DD",
           "rate": 0,
-          "type": "BASE"
+          "extra_bed_rate": 0,
+          "type": "BASE | WEEKDAY | WEEKEND"
         }
       ],
       "extra_bed_price": 0,
       "is_flat_rate": false,
-      "base_meal_plan": "RO",
+      "base_meal_plan": "${reqMeal}",
       "meal_price_per_pax": 0,
       "view_surcharges": {
         "city": 0,

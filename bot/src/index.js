@@ -3,11 +3,11 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys')
-
+const { processLocalRates } = require('./v2/localRateEngine');
 
 const { initDatabase } = require('./database');
 
-
+const { updateTiers, getCurrentTiers } = require('./v2/markupEngine');
 const { 
     createParentQuery,
     getLastActiveRequest, 
@@ -66,6 +66,8 @@ const {
 
 const { formatQueryForVendor } = require('./queryFormatter')
 const { findMatchingChild } = require('./vendorMatcher')
+
+const autoQuoter = require('./v2/autoQuoter');
 
 const { isSimpleRate } = require('./vendorRateClassifier')
 const { calculateSimpleRate } = require('./vendorRateLogic')
@@ -248,13 +250,24 @@ function extractMeal(text = '') {
   return '';
 }
 
+// ======================================================
+// 🔒 JUNK LINE DETECTOR
+// ======================================================
 function isJunkLine(line) {
   const t = line.toLowerCase();
+  
+  // 🛡️ THE FIX: Removed 'view', 'kabah', 'haram', 'suhoor', 'iftar', 'sharing', 'person'.
+  // These are handled intelligently by the Attribute Shield now so they don't accidentally
+  // nuke real hotel names like "Sky View" or "Haramain".
   const junkKeywords = [
     'cheap', 'best', 'rates', 'price', 'check', 'kindly', 
-    'please', 'offer', 'available', 'available?', 'base', 'net','Salam', 'Waalaikum', 'Assalam', 'Hello', 'Hi', 'Dear', 'Respected', 'Greetings','suhoor', 'iftar', 'view', 'kabah', 'haram', 'sharing', 'person','Thank', 'Thanks', 'Regards', 'Best', 'Wishes', 'Hello', 'Hi', 'Dear', 'Respected', 'Greetings'
+    'please', 'offer', 'available', 'available?', 'base', 'net',
+    'salam', 'waalaikum', 'assalam', 'hello', 'hi', 'dear', 
+    'respected', 'greetings', 'thank', 'thanks', 'regards', 'wishes'
   ];
-  return junkKeywords.some(word => t.includes(word));
+  
+  // We use word boundaries (\b) so "price" doesn't accidentally trigger inside another word
+  return junkKeywords.some(word => new RegExp(`\\b${word}\\b`, 'i').test(t));
 }
 
 function extractView(text = '') {
@@ -419,7 +432,7 @@ function normalizeHotelForAI(hotel = '') {
 
   // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
   // Added: ashra
-  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra)\b/i;
+  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|tripl|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra)\b/i;
   if (badPatterns.test(h)) return null;
 
   // 🛡️ 2. DATE & NUMBER BLOCKER
@@ -435,7 +448,7 @@ function normalizeHotelForAI(hotel = '') {
   const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|tripleone|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
   // 🛡️ NOISE CLEANER
 // Added: qued
-  h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|room|only|bed|breakfast|bb|ro)\b/gi, '').trim();
+  h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|room|only|tripl|bed|breakfast|bb|ro)\b/gi, '').trim();
 
   const words = h.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
@@ -572,9 +585,16 @@ async function startBot() {
                     modifier = parseInt(parts[1]) || 0; 
                 }
 
-                const quoteData = db.getQuoteByReqId(reqId);
+                const quoteData = getQuoteByReqId(reqId);
                 if (quoteData) {
                     const quote = JSON.parse(quoteData.full_json);
+                    
+                    // 🛡️ SAFETY CHECK: Block old database quotes from crashing the bot
+                    if (!quote.breakdown) {
+                        await sock.sendMessage(groupId, { text: '❌ This quote uses an old database format and cannot be forwarded. Please generate a new quote.' }, { quoted: msg });
+                        return;
+                    }
+
                     const { buildClientMessage } = require('./v2/formatter');
                     const finalMsg = buildClientMessage(quote, modifier);
                     
@@ -617,8 +637,8 @@ Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke 
 *⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
 
 📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali ( +923326873756 )
-• *Bot Details/Bug Reports:* Developer, Azlan Ali ( +923162724750 )
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
 *(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
 
@@ -634,8 +654,8 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
 *⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
 
 📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali ( +923326873756 )
-• *Bot Info/Bug Reports:* Developer, Azlan Ali ( +923162724750 )
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
 *(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
 
@@ -658,13 +678,52 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
 
     const role = getGroupRole(groupId);
 
-    // ============================================================
+// ============================================================
     // 👑 COMMAND MODE: OWNER OVERRIDE (Bypasses Employee Check)
     // ============================================================
-    // If the message is in the Owner group and starts with /bot del, let it through!
+    // (Your existing /bot del command is here...)
     if (role === 'OWNER' && rawText.trim().toLowerCase().startsWith('/bot del')) {
         await handleOwnerDeleteCommand(sock, msg, rawText.trim());
         return; 
+    }
+
+    // 🚀 NEW COMMAND: /setmarkup (Dynamic Profit Margins)
+    if (role === 'OWNER' && rawText.trim().toLowerCase().startsWith('/setmarkup')) {
+        const parts = rawText.trim().split(/\s+/).slice(1);
+        
+        if (parts.length === 0) {
+            const current = getCurrentTiers().map(t => `${t.threshold === Infinity ? 'MAX' : t.threshold} SAR = +${t.margin}`).join('\n');
+            await sock.sendMessage(groupId, { text: `📊 *CURRENT MARKUP RULES:*\n${current}\n\n*Usage:* /setmarkup 500=20 1000=40 max=60` }, { quoted: msg });
+            return;
+        }
+
+        const newTiers = [];
+        for (const part of parts) {
+            let [limit, margin] = part.split('=');
+            if (!limit || !margin) continue;
+
+            const parsedLimit = limit.toLowerCase() === 'max' ? Infinity : parseInt(limit, 10);
+            const parsedMargin = parseInt(margin, 10);
+
+            if (!isNaN(parsedMargin)) {
+                newTiers.push({ threshold: parsedLimit, margin: parsedMargin });
+            }
+        }
+
+        if (newTiers.length > 0) {
+            // Ensure there is always a MAX fallback
+            if (!newTiers.some(t => t.threshold === Infinity)) {
+                newTiers.push({ threshold: Infinity, margin: newTiers[newTiers.length - 1].margin });
+            }
+            
+            updateTiers(newTiers);
+            
+            const updated = getCurrentTiers().map(t => `${t.threshold === Infinity ? 'MAX' : t.threshold} SAR = +${t.margin}`).join('\n');
+            await sock.sendMessage(groupId, { text: `✅ *MARKUP RULES UPDATED!*\n\n${updated}` }, { quoted: msg });
+        } else {
+            await sock.sendMessage(groupId, { text: `❌ Invalid format. Use: /setmarkup 500=20 1000=40 max=60` }, { quoted: msg });
+        }
+        return;
     }
 
     // Now it is safe to block employees from sending normal hotel queries
@@ -965,10 +1024,17 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       
       const HUMAN_AGENT_ID = '243159590269138@lid'; 
 
-      // 🚨 FAILURE 1: NO VALID BLOCKS (Orphan rescue failed)
+// 🚨 FAILURE 1: NO VALID BLOCKS (Orphan rescue failed)
       if (blocks.length === 0) {
-        console.log("⚠️ No booking blocks. Summoning human.");
+        // 🧠 Check if they are just chatting (No months, no rooms, no hotel words)
+        const isJustChatting = !/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|room|dbl|double|trp|triple|quad|quint|suite|bed|pax|hotel|night)\b/i.test(effectiveText);
         
+        if (isJustChatting) {
+            console.log("🤫 Silently ignoring normal chat (No blocks).");
+            return;
+        }
+
+        console.log("⚠️ No booking blocks found in a suspected query. Summoning human.");
         await sock.sendMessage(groupId, { 
             text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ I cannot understand this query. Please deal with it manually.`,
             mentions: [HUMAN_AGENT_ID] 
@@ -988,6 +1054,9 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       });
 
       console.log(`📝 DB: Saved Parent Query ID: ${parentId}`);
+
+      // 🚀 PHASE 2.5: START THE AUTO-QUOTER TIMER!
+      autoQuoter.startTimer(parentId);
       // ... (Code continues to globalHotels extraction)
       const allQueries = [];
       
@@ -1086,24 +1155,25 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       // 🕵️ CONVERSATIONAL REPAIR
       // 🛡️ FIX: Added "last ashra" and "ramadan" to the date check
 // 🕵️ CONVERSATIONAL REPAIR
-      const hasDate = /(\d{1,2})\s*(?:to|-)?\s*(\d{1,2})?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText) || 
+// 🕵️ CONVERSATIONAL REPAIR
+      // 🛡️ FIX: Added support for 'st', 'nd', 'rd', 'th' and spaces inside dates!
+      const hasDate = /(\d{1,2})\s*(?:st|nd|rd|th)?\s*(?:to|-)?\s*(\d{1,2})?\s*(?:st|nd|rd|th)?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(effectiveText) || 
                       /last\s*ashra|ramadan/i.test(effectiveText);
 
-      // 🛡️ FIX: Added SUITE, STUDIO, FAMILY to room detection
-      const hasRoom = /\b(sgl|single|dbl|double|tw|twin|trp|triple|tripple|quad|quard|qad|qued|quint|pax|bed|room|guest|person|prsn|ppl|suite|studio|family)s?\b/i.test(effectiveText);
-      
+      // 🛡️ FIX: Added 'tripl' to the list of acceptable room words
+      const hasRoom = /\b(sgl|single|dbl|double|tw|twin|trp|tripl|triple|tripple|quad|quard|qad|qued|quint|pax|bed|room|guest|person|prsn|ppl|suite|studio|family)s?\b/i.test(effectiveText);      
+      // 🛡️ SILENT FAIL: Just clear memory and ignore if missing data. No spamming!
       if (!hasRoom && hasDate) {
           setPendingQuestion(groupId, { originalText: effectiveText, missing: 'ROOM' });
-          await sock.sendMessage(groupId, { text: "Which *Room Type*? (e.g. Double, Triple)" }, { quoted: msg });
+          console.log("⚠️ Ignored: Missing Room. Waiting silently for user to provide it.");
           return;
       }
       if (!hasDate && hasRoom) {
           setPendingQuestion(groupId, { originalText: effectiveText, missing: 'DATE' });
-          await sock.sendMessage(groupId, { text: "Which *Dates*? (e.g. 12 Feb to 15 Feb)" }, { quoted: msg });
+          console.log("⚠️ Ignored: Missing Date. Waiting silently for user to provide it.");
           return;
       }
       clearPendingQuestion(groupId);
-
       // ============================================================
       // 🛡️ 3. MAIN PROCESSING LOOP
       // ============================================================
@@ -1192,15 +1262,22 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             const isRoom = isRoomOnlyLine(line);
             const isDate = line.match(/\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i);
             
-            // 🛡️ THE ATTRIBUTE SHIELD: Prevents 'Suhoor' or 'View' from being hotels
-            const isAttribute = /view|kabah|haram|iftar|suhoor|breakfast|half|board|meal|sharing/i.test(line);
+// 🛡️ THE ATTRIBUTE SHIELD: Made stricter so it doesn't accidentally block "Sky View"
+            const isAttribute = /^(view|meal|board|sharing)$/i.test(line.trim().toLowerCase()) || 
+                                /\b(city view|haram view|kaaba view|partial view|suhoor|iftar|breakfast|half board|full board)\b/i.test(line);
 
-            // 🛡️ RESCUE RULES: Look at original line for keywords like 'Fundaq'
-            const hasHotelKeyword = /hotel|fundaq|fandaq|dar|tower|inn|suites|stay|voco|answar/i.test(originalLine) || splitBrands.test(line);
+
+                                // 🛡️ RESCUE RULES: Match against our massive list of known hotel brands
+            const hotelBrandKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|tripleone|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
+            
+            const hasHotelKeyword = hotelBrandKeywords.test(originalLine) || splitBrands.test(line);
             const isValidPhrase = line.split(/\s+/).filter(w => w.length > 2).length >= 2;
+            
+            // 🛡️ THE ULTIMATE BYPASS: If the global scanner already verified it, keep it!
+            const isAlreadyGlobal = globalHotels.some(gh => gh.toLowerCase() === line.toLowerCase());
 
             if (!isJunk && !isRoom && !isDate && !isAttribute) {
-                if (hasHotelKeyword || isValidPhrase) {
+                if (hasHotelKeyword || isValidPhrase || isAlreadyGlobal) {
                     potentialHotels.push(line);
                 }
             }
@@ -1218,8 +1295,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             const matchedName = rawSanitizedResults[index];
             
             // Search the ORIGINAL text lines to find stripped keywords
-            const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;
-            const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah/i.test(originalLine);
+            const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah|nabras|nebras|taiba|sky\s*view/i.test(originalLine);
             
             // Validation Gate Logic: Keep if DB match OR strong keyword
             if (matchedName || (hasStrongKeyword && raw.length > 3)) {
@@ -1364,7 +1440,7 @@ const aiInput = protectDoubleTreeHotel([
                   continue;
               }
 
-if (q.check_in === q.check_out) continue; // Basic sanity check
+            if (q.check_in === q.check_out) continue; // Basic sanity check
               
               if (q.confidence === 0) continue;
               
@@ -1378,7 +1454,6 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
               
               // 🛡️ FIX 26-B: Room Count Sanity Cap
               // Ignore numbers > 50 (Prevents years like "2026" being treated as room count)
-              // Old code: const explicitRoomCount = ...
               const rawCountMatch = effectiveText.match(/(\d+)\s*(?:room|dbl|double|quad|trip|trp|quint)/i);
               if (rawCountMatch) {
                   const val = parseInt(rawCountMatch[1], 10);
@@ -1414,8 +1489,7 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
               if (q.meal === 'IF') q.meal = 'IFTAR';
               if (q.meal === 'SU') q.meal = 'SUHOOR';
 
-
-              // ============================================================
+               // ============================================================
                // 💾 DATABASE: SAVE CHILD QUERY
                // ============================================================
                const childId = createChildQuery({
@@ -1435,21 +1509,16 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
                
                console.log(`   ↳ 📝 DB: Saved Child Query ID: ${childId} (${q.hotel})`);
 
-              if (q.check_in && q.check_out) {
-                  allQueries.push(q);
-                  requestCount++;
-              }
+               autoQuoter.linkChildToParent(childId, parentId);
 
               if (q.check_in && q.check_out) {
                   allQueries.push(q);
                   requestCount++;
               }
+
           }
        } 
       }
-      
-      // ... (Rest of the standard V1 sending logic & V2 shadow mode logic remains identical)
-      // I am keeping the bottom half standard as requested.
       
       if (limitReached) {
           for (const owner of getOwnerGroups()) {
@@ -1459,13 +1528,17 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
           }
       }
       
-    // 🚨 FAILURE 3: NO VALID QUERIES GENERATED (After parsing)
+      // 🚨 FAILURE 3: NO VALID QUERIES GENERATED (After parsing)
       if (!allQueries.length) {
-        console.log("⚠️ Booking rejected (no valid queries). Summoning human.");
+        // 🧠 Check if they are just chatting
+        const isJustChatting = !/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|room|dbl|double|trp|triple|quad|quint|suite|bed|pax|hotel|night)\b/i.test(effectiveText);
         
-        // ⚠️ Ensure HUMAN_AGENT_ID is defined at the top of your file!
-        // const HUMAN_AGENT_ID = '923001234567@s.whatsapp.net'; 
+        if (isJustChatting) {
+            console.log("🤫 Silently ignoring normal chat (AI returned empty).");
+            return;
+        }
 
+        console.log("⚠️ Booking rejected (no valid queries). Summoning human.");
         await sock.sendMessage(groupId, { 
             text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ Query rejected (No valid queries generated). Please deal with it manually.`,
             mentions: [HUMAN_AGENT_ID] 
@@ -1474,7 +1547,7 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
         return;
       }
 
-// ============================================================
+      // ============================================================
       // 🛡️ 4. FINAL DEDUPLICATION (The "Simple Rule")
       // ============================================================
       // Rule: SAME HOTEL & SAME DATES & SAME ROOM TYPE -> NEVER REPEAT
@@ -1493,12 +1566,10 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
           const signature = `${cleanName}|${q.check_in}|${q.check_out}|${q.room_type}`;
 
           // 3. Check & Push (FIXED LOGIC)
-          // Only push to uniqueQueries if we have NOT seen this signature yet
           if (!seenSignatures.has(signature)) {
               seenSignatures.add(signature);
               uniqueQueries.push(q);
           } else {
-              // It's a duplicate, ignore it.
               console.log(`🗑️ Duplicate Skipped: ${q.hotel} (${q.check_in})`);
           }
       }
@@ -1509,6 +1580,7 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
       const queriesWithRates = [];
       const queriesForVendors = [];
 
+      // Check V1 Static Rates First
       for (const q of finalQueries) {
         const myRate = checkSavedRate(
             q.hotel, q.check_in, q.check_out, q.persons || 2, 
@@ -1518,6 +1590,7 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
         else queriesForVendors.push(q);
       }
 
+      // Send V1 Static Rates
       for (const item of queriesWithRates) {
           const { query, rate } = item;
           const fullType = rate.room_descriptor || 'Room';
@@ -1531,12 +1604,10 @@ if (q.check_in === q.check_out) continue; // Basic sanity check
                   break;
               }
           }
-const totalAmount = rate.breakdown.reduce((sum, b) => sum + b.price, 0);
+          const totalAmount = rate.breakdown.reduce((sum, b) => sum + b.price, 0);
           const averageRate = Math.round(totalAmount / rate.breakdown.length);
           const mealViewLine = `${rate.applied_meal}${rate.applied_view ? ` / ${rate.applied_view}` : ''}`;
           
-          // 🛑 ERROR WAS HERE: "dateLabel" is not defined in this scope.
-          // ✅ FIX: Use "query.dateLabel" only.
           const dateDisplay = formatDateRange(query.check_in, query.check_out, query.dateLabel);
 
           const replyText = 
@@ -1550,13 +1621,11 @@ ${mealViewLine}
           await sock.sendMessage(groupId, { text: replyText }, { quoted: msg });
       }
 
-if (queriesForVendors.length > 0) {
+      // Process Vendor Group Queries
+      if (queriesForVendors.length > 0) {
           await sock.sendMessage(groupId, { text: 'checking' }, { quoted: msg });
 
-          // 🧠 INTELLIGENT DISTRIBUTION LOGIC (1 Query Per Vendor Per Date Range)
-          
-          // 1. Group Queries by Date Range
-          // Key: "2026-02-18|2026-02-20", Value: [Query Objects]
+          // 🧠 INTELLIGENT DISTRIBUTION LOGIC
           const queriesByDate = {};
           for (const q of queriesForVendors) {
               const key = `${q.check_in}|${q.check_out}`;
@@ -1564,14 +1633,13 @@ if (queriesForVendors.length > 0) {
               queriesByDate[key].push(q);
           }
 
-          // 2. Process each Date Range independently
+          // Process each Date Range independently
           for (const [dateKey, queries] of Object.entries(queriesByDate)) {
               
-              const usedVendorsForThisDate = new Set(); // 🔒 Locks vendors for this specific date range
+              const usedVendorsForThisDate = new Set();
               const uniqueHotels = [...new Set(queries.map(q => q.hotel))];
               
-              // 3. SCARCITY SORT: Process hotels with FEWER vendors first!
-              // This prevents a "popular" vendor from taking a job that only they could do elsewhere.
+              // Sort by Scarcity
               const hotelOps = uniqueHotels.map(hotel => {
                   return { 
                       hotel, 
@@ -1579,76 +1647,87 @@ if (queriesForVendors.length > 0) {
                   };
               }).sort((a, b) => a.vendors.length - b.vendors.length);
 
-              // 4. Assign Vendors
+              // Assign Vendors
               for (const op of hotelOps) {
                   const { hotel, vendors } = op;
                   
-                  // Find relevant query for this hotel (to create child)
-                  const relevantQuery = queries.find(q => q.hotel === hotel);
-                  if (!relevantQuery) continue;
+                  const hotelQueries = queries.filter(q => q.hotel === hotel);
+                  if (hotelQueries.length === 0) continue;
 
-                  // Filter: Only pick vendors who haven't been used for this Date Range yet
                   const availableVendors = vendors.filter(v => !usedVendorsForThisDate.has(v));
-                  
-                  // Limit: Respect global limit (e.g. max 2 vendors per hotel), but primarily fresh ones
                   const selectedVendors = availableVendors.slice(0, LIMITS.MAX_VENDORS_PER_HOTEL);
 
-// ... inside the loop where you process each hotel ...
+                  if (selectedVendors.length > 0) {
+                      // Loop through EVERY query for this hotel
+                      for (const relevantQuery of hotelQueries) {
+                          
+                          // ============================================================
+                          // 🛡️ V2.5 LOCAL RATE ENGINE CHECK (RIGHT BEFORE SENDING)
+                          // ============================================================
+                          console.log(`🔍 Checking local database for recent rates for ${hotel}...`);
+                          
+                          // Construct quoteData so the formatter knows where to send the instant reply
+                          const localQuoteData = {
+                              client_group_id: groupId,
+                              client_msg_id: msg.key.id,
+                              client_participant: msg.key.participant || msg.key.remoteJid,
+                              original_text: effectiveText,
+                              parent_id: parentId
+                          };
 
-if (selectedVendors.length > 0) {
-          console.log(`📤 Sending ${hotel} (${relevantQuery.check_in}) to:`, selectedVendors);
-          
-          const dbChildId = relevantQuery.db_child_id;
+                          const foundLocalRate = await processLocalRates(relevantQuery, sock, localQuoteData);
 
-          if (!dbChildId) {
-              console.error("❌ Error: Missing DB Child ID for", hotel);
-              continue;
-          }
-          // This calls your groupConfig logic to get '101'
-          const clientCode = getClientCode(groupId) || 'REQ';
+                          if (foundLocalRate) {
+                              console.log(`✅ Skipped sending ${hotel} to vendors (Handled instantly from Local DB)`);
+                              continue; // 🛑 Skips the vendor messaging entirely and moves to the next query!
+                          }
+                          // ============================================================
 
+                          console.log(`📤 Sending ${hotel} (${relevantQuery.check_in} - ${relevantQuery.room_type}) to:`, selectedVendors);
+                          
+                          const dbChildId = relevantQuery.db_child_id;
 
+                          if (!dbChildId) {
+                              console.error("❌ Error: Missing DB Child ID for", hotel);
+                              continue;
+                          }
+                          
+                          const clientCode = getClientCode(groupId) || 'REQ';
 
-          // 🔍 LOG 1: Check variables here
-          console.log(`🔍 [DEBUG] Pre-Format: ID=${dbChildId}, Code=${clientCode}`);
+                          console.log(`🔍 [DEBUG] Pre-Format: ID=${dbChildId}, Code=${clientCode}`);
 
-          // ✅ We pass 'clientCode' and 'id' explicitly to the formatter
-          const vendorMessageText = formatQueryForVendor({ 
-              id: dbChildId,         
-              clientCode: clientCode, 
-              parsed: relevantQuery 
-          });
+                          const vendorMessageText = formatQueryForVendor({ 
+                              id: dbChildId,         
+                              clientCode: clientCode, 
+                              parsed: relevantQuery 
+                          });
 
-          // 🔍 LOG 2: Check the final string
-          console.log(`🔍 [DEBUG] Final Text Preview: ${vendorMessageText.split('\n')[0]}`);
+                          console.log(`🔍 [DEBUG] Final Text Preview: ${vendorMessageText.split('\n')[0]}`);
 
-          for (const vg of selectedVendors) {
-              // 1. Send Message
-              const sent = await sock.sendMessage(vg, { text: vendorMessageText });
-              
-              // 2. 💾 DATABASE: LOG REQUEST
-              if (sent?.key?.id) {
-                  logVendorRequest({
-                      child_id: dbChildId,
-                      vendor_group_id: vg,
-                      sent_message_id: sent.key.id
-                  });
-                  console.log(`      ↳ 🔗 DB: Linked Message ${sent.key.id} to Child ${dbChildId} [${clientCode}]`);
+                          for (const vg of selectedVendors) {
+                              // 1. Send Message
+                              const sent = await sock.sendMessage(vg, { text: vendorMessageText });
+                              
+                              // 2. 💾 DATABASE: LOG REQUEST
+                              if (sent?.key?.id) {
+                                  logVendorRequest({
+                                      child_id: dbChildId,
+                                      vendor_group_id: vg,
+                                      sent_message_id: sent.key.id
+                                  });
+                                  console.log(`      ↳ 🔗 DB: Linked Message ${sent.key.id} to Child ${dbChildId} [${clientCode}]`);
+                              }
+                              
+                              await sleep(VENDOR_SEND_DELAY_MS);
+                          }
+                      } // <-- End of hotelQueries loop
+                  } else {
+                      console.log(`⚠️ Skipped ${hotel}: All vendors booked.`);
+                  }
               }
-              
-              // 🔒 LOCK THIS VENDOR
-              //usedVendorsForThisDate.add(vg); 
-              
-              await sleep(VENDOR_SEND_DELAY_MS);
-          }
-      } else {
-          console.log(`⚠️ Skipped ${hotel}: All vendors booked.`);
-      }
-                                  }
           }
         }
       }
-      
       // ======================================================
     // 🧪 V2 SHADOW MODE (Vendor Reply Handler)
     // ======================================================
@@ -1691,10 +1770,12 @@ if (selectedVendors.length > 0) {
             if (!newHotel) {
                 const firstLine = potentialLines[0];
                 
-                // Check if the line looks like a price or room type (e.g., contains slashes or "dbl/trp/ro")
-                const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine);
+// Check if the line looks like a price or room type
+                const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine) || /^\d+$/.test(firstLine.replace(/[^\d]/g, ''));
                 const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
-                const isVendorJunk = /booked|sold|out|stop|sale|unavailable/i.test(firstLine);
+                
+                // 🛡️ THE FIX: Added 'w.e', 'weekend', 'extra', and 'ex' so it never mistakes them for a hotel name
+                const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b/i.test(firstLine);
                 
                 if (!isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
                     newHotel = firstLine; 
@@ -1758,6 +1839,11 @@ if (selectedVendors.length > 0) {
               const owners = getOwnerGroups();
               for (const ownerGroupId of owners) {
                   await sock.sendMessage(ownerGroupId, { text: report });
+              }
+
+              const quoteData = getQuoteByReqId(context.request_id);
+              if (quoteData) {
+                  await autoQuoter.evaluateQuote(v2Quote, quoteData, context.child_id, sock);
               }
 
           } else {

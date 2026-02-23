@@ -2,3 +2,6 @@ node_modules/
 .env
 .DS_Store
 auth/
+# Database files
+bot.db
+bot.db-journal
