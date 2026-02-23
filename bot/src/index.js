@@ -1036,7 +1036,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
         console.log("⚠️ No booking blocks found in a suspected query. Summoning human.");
         await sock.sendMessage(groupId, { 
-            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ I cannot understand this query. Please deal with it manually.`,
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} `,
             mentions: [HUMAN_AGENT_ID] 
         }, { quoted: msg });
         
