@@ -1540,7 +1540,7 @@ const aiInput = protectDoubleTreeHotel([
 
         console.log("⚠️ Booking rejected (no valid queries). Summoning human.");
         await sock.sendMessage(groupId, { 
-            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ Query rejected (No valid queries generated). Please deal with it manually.`,
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️`,
             mentions: [HUMAN_AGENT_ID] 
         }, { quoted: msg });
         
