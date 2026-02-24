@@ -1034,7 +1034,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             return;
         }
 
-        console.log("⚠️ No booking blocks found in a suspected query. Summoning human.");
+        console.log("⚠️ ");
         await sock.sendMessage(groupId, { 
             text: `@${HUMAN_AGENT_ID.split('@')[0]} `,
             mentions: [HUMAN_AGENT_ID] 
@@ -1097,10 +1097,10 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
       // 🚨 FAILURE 2: ONLY "ANY" HOTELS FOUND
       if (globalHotels.length === 0) {
-          console.log("⚠️ Query rejected: Only generic 'Any' hotels found. Summoning human.");
+          console.log("⚠️ ");
           
           await sock.sendMessage(groupId, { 
-            text: `@${HUMAN_AGENT_ID.split('@')[0]} ⚠️ Query rejected I Cannot Check Any Hotel Queries. Please deal with it manually.`,
+            text: `@${HUMAN_AGENT_ID.split('@')[0]} .`,
             mentions: [HUMAN_AGENT_ID] 
         }, { quoted: msg });
           
@@ -1109,7 +1109,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
       // 🚨 KILL SWITCH: If no specific hotels remain, STOP.
       if (globalHotels.length === 0) {
-          console.log("⚠️ Query rejected: Only generic 'Any' hotels found.");
+          console.log("⚠️.");
           return;
       }
 
