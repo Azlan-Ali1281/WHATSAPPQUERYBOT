@@ -102,6 +102,49 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
             return null;
         }
     }
+
+    // ======================================================
+    // 🛡️ GATE 2.5: ZERO-RATE & FLAT-RATE PROTECTIONS
+    // ======================================================
+    
+    // 1. THE ZERO-RATE BLOCKER
+    // Base rate can NEVER be 0. If the AI hallucinates a 0, kill the quote immediately.
+    if (allRates.some(r => r.rate <= 0)) {
+        console.log(`🚫 V2 REJECTED: AI extracted a base rate of 0. Invalid quote.`);
+        return null;
+    }
+
+// 2. LAST ASHRA / MARCH FLAT-RATE OVERRIDE (Now with Extra Bed support)
+    // If dates touch March (Last Ashra) and the rate is > 4000, it's a flat package rate.
+    const involvesMarch = childQuery.check_in.includes('-03-') || childQuery.check_out.includes('-03-');
+    
+    if (involvesMarch) {
+        const qStart = new Date(childQuery.check_in);
+        const qEnd = new Date(childQuery.check_out);
+        const totalNights = Math.round((qEnd - qStart) / (1000 * 60 * 60 * 24)) || 1;
+
+        let packageOverrideTriggered = false;
+
+        allRates.forEach(r => {
+            if (r.rate > 4000) {
+                console.log(`⚠️ OVERRIDE: March/Ashra Flat Rate detected (${r.rate} SAR). Dividing by ${totalNights} nights.`);
+                r.rate = Math.round(r.rate / totalNights);
+                
+                // 🛡️ THE FIX: Divide the split-rate extra bed price if it exists
+                if (r.extra_bed_rate > 0) {
+                    r.extra_bed_rate = Math.round(r.extra_bed_rate / totalNights);
+                }
+                
+                packageOverrideTriggered = true;
+            }
+        });
+
+        // 🛡️ THE FIX: Also divide the global extra bed price so the math loop doesn't charge it nightly!
+        if (packageOverrideTriggered && vendorData.extra_bed_price > 0) {
+            console.log(`⚠️ OVERRIDE: Dividing global Extra Bed price (${vendorData.extra_bed_price} SAR) by ${totalNights} nights.`);
+            vendorData.extra_bed_price = Math.round(vendorData.extra_bed_price / totalNights);
+        }
+    }
         // ======================================================
     // 🧮 CALCULATION LOGIC (PER ROOM)
     // ======================================================

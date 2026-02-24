@@ -233,7 +233,24 @@ function getLastActiveRequest(vendorGroupId) {
 // ======================================================
 module.exports = {
     getDatabase: () => db, 
-    createParentQuery: (data) => saveParent.run(data).lastInsertRowid,
+    createParentQuery: (data) => {
+        try {
+            // 🛡️ THE FIX: Check if we already saved this exact WhatsApp message
+            const checkExisting = db.prepare('SELECT id FROM parent_queries WHERE message_id = ?').get(data.message_id);
+            
+            if (checkExisting) {
+                console.log(`⚠️ DB: Caught duplicate WhatsApp message event. Skipping insert to prevent crash.`);
+                return checkExisting.id; // Safely return the existing ID so index.js can keep running
+            }
+            
+            // If it's a brand new message, insert it normally
+            return saveParent.run(data).lastInsertRowid;
+            
+        } catch (error) {
+            console.log(`❌ DB Error handled safely: ${error.message}`);
+            return null;
+        }
+    },
     
     // 🛡️ REINFORCED: Ensures 'meal' and 'view' are never missing during INSERT
     createChildQuery: (data) => {

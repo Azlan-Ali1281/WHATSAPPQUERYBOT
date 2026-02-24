@@ -15,7 +15,7 @@ const OFFICIAL_REGISTRY = [
   "Leader Al Muna Kareem", "Odst Al Madinah", "Artal International", "Zowar International", 
   "Taiba Front", "Aqeeq Madinah", "Frontel Al Harithia", "Dallah Taibah", 
   "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Sky View","Province Al Sham", "Taif Al Nebras" ,
-  "Gulnar Taiba", "Emaar Al Manar","Frontel Al Harithia",
+  "Gulnar Taiba", "Emaar Al Manar","Frontel Al Harithia","Bir Al Eiman","Tara Al Hijra","Rama Al Madinah","Miramar",
   
   // 🕋 MAKKAH (Clock Tower)
   "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
@@ -26,10 +26,13 @@ const OFFICIAL_REGISTRY = [
   "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 
   "Conrad Makkah", "Jabal Omar Marriott", "Saif Al Majd","Address Jabal Omar", 
   "Sheraton Makkah Jabal Al Kaaba", "DoubleTree by Hilton Makkah", 
-  "Le Meridien Makkah", "Waqf Uthman",
+  "Le Meridien Makkah", "Waqf Uthman", "Safwat Al Medina","Courtyard By Marriott",
+  "Courtyard By Marriot",
+  "Courtyard Makkah",
+  "Courtyard Madinah","Mira Sud","majd al muhajireen","Maden Madinah","Zila Al Nazula",
 
   // 🚌 MAKKAH (Aziziyah/Shuttle)
-  "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", 
+  "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", "Holiday Inn","Worth Peninsula",
   "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah", "Triple One" ,"Four Points by Sheraton Makkah", "Emaar Grand Makkah", "Emaar Elite Makkah"
 ];
 

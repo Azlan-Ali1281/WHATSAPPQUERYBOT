@@ -1748,57 +1748,60 @@ ${mealViewLine}
 
       console.log(`✅ DB MATCH: Vendor replied to Query ID ${context.child_id} (${context.requested_hotel})`);
 
-      try {
-          // ============================================================
-          // 🕵️ DETECT HOTEL CHANGE (The "Le Meridien" Fix)
-          // ============================================================
-          let actualHotel = context.requested_hotel; 
-          
-          // 1. Clean the reply lines to find potential names
-          const potentialLines = rawText.split('\n')
-              .map(l => l.trim())
-              .filter(l => l.length > 3 && !isRoomOnlyLine(l) && !/^\d+/.test(l));
+try {
+            // ============================================================
+            // 🕵️ DETECT HOTEL CHANGE (The "Le Meridien" Fix)
+            // ============================================================
+            let actualHotel = context.requested_hotel; 
+            
+            // 1. Clean the reply lines to find potential names
+            const potentialLines = rawText.split('\n')
+                .map(l => l.trim())
+                .filter(l => l.length > 3 && !isRoomOnlyLine(l) && !/^\d+/.test(l));
 
-          if (potentialLines.length > 0) {
-              console.log("🔍 Scanning reply for Hotel Name Override...", potentialLines);
-              
-              // 2. Run Sanitizer
-              const sanitizedCandidates = await sanitizeHotelNames(potentialLines);
-              let newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
-              
-            // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
-            if (!newHotel) {
-                const firstLine = potentialLines[0];
+            if (potentialLines.length > 0) {
+                console.log("🔍 Scanning reply for Hotel Name Override...", potentialLines);
                 
-// Check if the line looks like a price or room type
-                const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine) || /^\d+$/.test(firstLine.replace(/[^\d]/g, ''));
-                const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
+                // 2. Run Sanitizer
+                const sanitizedCandidates = await sanitizeHotelNames(potentialLines);
+                let newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
                 
-                // 🛡️ THE FIX: Added 'w.e', 'weekend', 'extra', and 'ex' so it never mistakes them for a hotel name
-                const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b/i.test(firstLine);
-                
-                if (!isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
-                    newHotel = firstLine; 
-                    console.log(`⛑️ Vendor Hotel Rescued (Raw Text): "${newHotel}"`);
-                } else {
-                    console.log(`🚫 Rescue Skipped: Line "${firstLine}" looks like a price or room code.`);
-                    // Fallback to the hotel name we originally asked for
-                    newHotel = context.requested_hotel;
+                // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
+                // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
+                if (!newHotel) {
+                    // 🛡️ THE FIX: Strip out conversational words FIRST!
+                    // If we don't do this first, isJunkLine() sees "offer" and kills it instantly.
+                    let firstLine = potentialLines[0].replace(/can offer|we have|available|offering|how about|we can give|offer/ig, '').trim();
+                    
+                    // Check if the cleaned line looks like a price or room type
+                    const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine) || /^\d+$/.test(firstLine.replace(/[^\d]/g, ''));
+                    const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
+                    
+                    // 🛡️ Heavily expanded junk word list
+                    const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b|recheck|before|final|list|check|please|kindly|wait|let me|checking|dear/i.test(firstLine);
+                    
+                    // Now test the CLEANED name (which will just be "miramar")
+                    if (firstLine.length >= 3 && !isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
+                        newHotel = firstLine; 
+                        console.log(`⛑️ Vendor Hotel Rescued (Raw Text): "${newHotel}"`);
+                    } else {
+                        console.log(`🚫 Rescue Skipped: Line "${firstLine}" looks like a price or room code (or junk).`);
+                        // Fallback to the hotel name we originally asked for
+                        newHotel = context.requested_hotel;
+                    }
                 }
+                  
+                if (newHotel && newHotel.toLowerCase() !== actualHotel.toLowerCase()) {
+                    console.log(`🔄 Hotel Override Detected: "${actualHotel}" -> "${newHotel}"`);
+                    actualHotel = newHotel;
+                }
+            } // <-- THIS BRACKET WAS LIKELY MISSING OR MISPLACED
+
+            // 🛡️ SMART VIEW DETECTION
+            let detectedView = extractView(rawText); 
+            if (!detectedView) {
+                detectedView = context.view || "CITY VIEW";
             }
-              
-              if (newHotel) {
-                  console.log(`🔄 Hotel Override Detected: "${actualHotel}" -> "${newHotel}"`);
-                  actualHotel = newHotel;
-              }
-          }
-
-          // 🛡️ SMART VIEW DETECTION
-          let detectedView = extractView(rawText); 
-          if (!detectedView) {
-              detectedView = context.view || "CITY VIEW";
-          }
-
           // ============================================================
           // 🧮 PREPARE CALCULATOR (WITH MEAL FIX)
           // ============================================================
