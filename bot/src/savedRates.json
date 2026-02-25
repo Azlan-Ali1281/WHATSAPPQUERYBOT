@@ -118,5 +118,924 @@
         }
       }
     ]
+  },
+  {
+    "id": "HTL_HARITHIA_001",
+    "hotel_info": {
+      "name": "Frontel Al Harithia",
+      "aliases": ["Al Harithia", "Harithia", "Al Harithia Hotel", "Al Harthia"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 200,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 0,
+          "sahour": 0,
+          "iftar": 130,
+          "hb": 130,
+          "lunch_dinner": 130
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 840, "extra_bed": 100 },
+          "weekend": { "single_double": 840, "extra_bed": 100 }
+        }
+      },
+      {
+        "description": "Mid Ramadan",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 1560, "extra_bed": 200 },
+          "weekend": { "single_double": 1560, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Late Mid Ramadan",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 1360, "extra_bed": 200 },
+          "weekend": { "single_double": 1360, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 1460, "extra_bed": 200 },
+          "weekend": { "single_double": 1460, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Eid / Post Ramadan",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 940, "extra_bed": 110 },
+          "weekend": { "single_double": 940, "extra_bed": 110 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-24",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 110 },
+          "weekend": { "single_double": 640, "extra_bed": 110 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_SHAZA_REGENCY_001",
+    "hotel_info": {
+      "name": "Shaza Regency",
+      "aliases": ["Shaza Regency Plaza", "Shaza Regency", "Regency Plaza"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 25,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 40,
+          "lunch_dinner": 80,
+          "iftar": 90,
+          "sahour": 70
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Pre/Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 25 },
+          "weekend": { "single_double": 640, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 1",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 815, "extra_bed": 25 },
+          "weekend": { "single_double": 815, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 2",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 790, "extra_bed": 25 },
+          "weekend": { "single_double": 790, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 915, "extra_bed": 25 },
+          "weekend": { "single_double": 915, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 25 },
+          "weekend": { "single_double": 640, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-24",
+        "rates": {
+          "weekday": { "single_double": 345, "extra_bed": 25 },
+          "weekend": { "single_double": 345, "extra_bed": 25 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_TAIBAH_FRONT_001",
+    "hotel_info": {
+      "name": "Taiba Front",
+      "aliases": ["Taibah Front", "Taiba Front"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 50,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 50,
+          "lunch_dinner": 110,
+          "iftar": 130,
+          "sahour": 100
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Pre-Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 50 },
+          "weekend": { "single_double": 640, "extra_bed": 50 }
+        }
+      },
+      {
+        "description": "Ramadan Main",
+        "start": "03-05",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 890, "extra_bed": 50 },
+          "weekend": { "single_double": 890, "extra_bed": 50 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 715, "extra_bed": 50 },
+          "weekend": { "single_double": 715, "extra_bed": 50 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-07",
+        "rates": {
+          "weekday": { "single_double": 470, "extra_bed": 50 },
+          "weekend": { "single_double": 470, "extra_bed": 50 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_GRAND_PLAZA_BADR_001",
+    "hotel_info": {
+      "name": "Grand Plaza Badr Al Maqam",
+      "aliases": ["Grand Plaza Badr Al Maqam", "Badr Al Maqam", "Grand Plaza Badr"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 25,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 40,
+          "lunch_dinner": 80,
+          "iftar": 80,
+          "sahour": 60
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Pre-Ramadan",
+        "start": "02-26",
+        "end": "02-28",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 25 },
+          "weekend": { "single_double": 640, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Early",
+        "start": "03-01",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 590, "extra_bed": 25 },
+          "weekend": { "single_double": 590, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 1",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 815, "extra_bed": 25 },
+          "weekend": { "single_double": 815, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 2",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 790, "extra_bed": 25 },
+          "weekend": { "single_double": 790, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 915, "extra_bed": 25 },
+          "weekend": { "single_double": 915, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 25 },
+          "weekend": { "single_double": 640, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-17",
+        "rates": {
+          "weekday": { "single_double": 345, "extra_bed": 25 },
+          "weekend": { "single_double": 345, "extra_bed": 25 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_GRAND_PLAZA_ALMADINA_001",
+    "hotel_info": {
+      "name": "Grand Plaza Almadina",
+      "aliases": ["Grand Plaza Almadina", "Grand Plaza Al Madina", "Grand Plaza Madina"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 25,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 40,
+          "lunch_dinner": 80,
+          "iftar": 80,
+          "sahour": 60
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Pre-Ramadan",
+        "start": "02-26",
+        "end": "02-28",
+        "rates": {
+          "weekday": { "single_double": 565, "extra_bed": 25 },
+          "weekend": { "single_double": 565, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Early",
+        "start": "03-01",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 540, "extra_bed": 25 },
+          "weekend": { "single_double": 540, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak",
+        "start": "03-05",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 690, "extra_bed": 25 },
+          "weekend": { "single_double": 690, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 790, "extra_bed": 25 },
+          "weekend": { "single_double": 790, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 590, "extra_bed": 25 },
+          "weekend": { "single_double": 590, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-17",
+        "rates": {
+          "weekday": { "single_double": 320, "extra_bed": 25 },
+          "weekend": { "single_double": 320, "extra_bed": 25 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_MAYSAN_REHAB_001",
+    "hotel_info": {
+      "name": "Maysan Rehab Elmysk",
+      "aliases": ["Maysan Rehab Elmysk", "Rehab Elmysk", "Rehab Al Misk", "Maysan Rehab"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 25,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 30,
+          "lunch_dinner": 40,
+          "iftar": 40,
+          "sahour": 30
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 495, "extra_bed": 25 },
+          "weekend": { "single_double": 495, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 1",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 665, "extra_bed": 25 },
+          "weekend": { "single_double": 665, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 2",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 25 },
+          "weekend": { "single_double": 640, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 665, "extra_bed": 25 },
+          "weekend": { "single_double": 665, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 495, "extra_bed": 25 },
+          "weekend": { "single_double": 495, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-24",
+        "rates": {
+          "weekday": { "single_double": 295, "extra_bed": 25 },
+          "weekend": { "single_double": 295, "extra_bed": 25 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_ARKAN_ALMANAR_001",
+    "hotel_info": {
+      "name": "Arkan Almanar",
+      "aliases": ["Arkan Almanar", "Arkan Al Manar"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 25,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 30,
+          "lunch_dinner": 40,
+          "iftar": 40,
+          "sahour": 30
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 540, "extra_bed": 25 },
+          "weekend": { "single_double": 540, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Mid to Late Ramadan",
+        "start": "03-05",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 590, "extra_bed": 25 },
+          "weekend": { "single_double": 590, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 470, "extra_bed": 25 },
+          "weekend": { "single_double": 470, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-17",
+        "rates": {
+          "weekday": { "single_double": 295, "extra_bed": 25 },
+          "weekend": { "single_double": 295, "extra_bed": 25 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_MAYSAN_ALTAQWA_001",
+    "hotel_info": {
+      "name": "Maysan Altaqwa",
+      "aliases": ["Maysan Altaqwa", "Maysan Al Taqwa", "Al Taqwa"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": true,
+      "flat_till_pax": 4,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 0,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 30,
+          "lunch_dinner": 40,
+          "iftar": 40,
+          "sahour": 30
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 460, "extra_bed": 0 },
+          "weekend": { "single_double": 460, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 1",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 565, "extra_bed": 0 },
+          "weekend": { "single_double": 565, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 2",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 540, "extra_bed": 0 },
+          "weekend": { "single_double": 540, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 615, "extra_bed": 0 },
+          "weekend": { "single_double": 615, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 440, "extra_bed": 0 },
+          "weekend": { "single_double": 440, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-17",
+        "rates": {
+          "weekday": { "single_double": 250, "extra_bed": 0 },
+          "weekend": { "single_double": 250, "extra_bed": 0 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_PLAZA_INN_OHUD_001",
+    "hotel_info": {
+      "name": "Plaza Inn Ohud",
+      "aliases": ["Plaza Inn Ohud", "Plaza Inn Ohd"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": true,
+      "flat_till_pax": 4,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 0,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 30,
+          "lunch_dinner": 40,
+          "iftar": 40,
+          "sahour": 30
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 420, "extra_bed": 0 },
+          "weekend": { "single_double": 420, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Mid to Late Ramadan",
+        "start": "03-05",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 470, "extra_bed": 0 },
+          "weekend": { "single_double": 470, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 390, "extra_bed": 0 },
+          "weekend": { "single_double": 390, "extra_bed": 0 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-17",
+        "rates": {
+          "weekday": { "single_double": 220, "extra_bed": 0 },
+          "weekend": { "single_double": 220, "extra_bed": 0 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_DAR_AL_TAQWA_001",
+    "hotel_info": {
+      "name": "Dar Al Taqwa",
+      "aliases": ["Dar Al Taqwa", "Dar Al Taqwa Hotel"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": false,
+      "default_extra_bed_rate": 600,
+      "surcharges": {
+        "views": {
+          "haram": 450,
+          "city": 0
+        },
+        "meals": {
+          "bb": 0,
+          "lunch_dinner": 240,
+          "iftar": 240,
+          "sahour": 180
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 1660, "extra_bed": 600 },
+          "weekend": { "single_double": 2160, "extra_bed": 600 }
+        }
+      },
+      {
+        "description": "Mid to Late Ramadan",
+        "start": "03-05",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 2510, "extra_bed": 600 },
+          "weekend": { "single_double": 4210, "extra_bed": 600 }
+        }
+      },
+      {
+        "description": "Eid & Shawwal",
+        "start": "03-20",
+        "end": "05-01",
+        "rates": {
+          "weekday": { "single_double": 870, "extra_bed": 240 },
+          "weekend": { "single_double": 1070, "extra_bed": 240 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_AL_AQEEQ_001",
+    "hotel_info": {
+      "name": "Al Aqeeq",
+      "aliases": ["Al Aqeeq", "Al Aqeeq Hotel", "Al Aqeeq Madinah"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 100,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 0,
+          "sahour": 0,
+          "lunch_dinner": 110,
+          "iftar": 130
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-04",
+        "rates": {
+          "weekday": { "single_double": 815, "extra_bed": 100 },
+          "weekend": { "single_double": 815, "extra_bed": 100 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 1",
+        "start": "03-05",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 1460, "extra_bed": 200 },
+          "weekend": { "single_double": 1460, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Ramadan Peak 2",
+        "start": "03-09",
+        "end": "03-14",
+        "rates": {
+          "weekday": { "single_double": 1260, "extra_bed": 200 },
+          "weekend": { "single_double": 1260, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Last Ashra",
+        "start": "03-15",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 1410, "extra_bed": 200 },
+          "weekend": { "single_double": 1410, "extra_bed": 200 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 890, "extra_bed": 100 },
+          "weekend": { "single_double": 890, "extra_bed": 100 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-07",
+        "rates": {
+          "weekday": { "single_double": 615, "extra_bed": 100 },
+          "weekend": { "single_double": 615, "extra_bed": 100 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_TAIBA_MADINAH_001",
+    "hotel_info": {
+      "name": "Taiba Madinah",
+      "aliases": ["Taiba Madinah", "Taiba Madinah Hotel"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": true,
+      "default_extra_bed_rate": 50,
+      "surcharges": {
+        "views": { "haram": 0, "city": 0 },
+        "meals": {
+          "bb": 50,
+          "sahour": 100,
+          "lunch_dinner": 110,
+          "iftar": 130
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Early Ramadan",
+        "start": "02-26",
+        "end": "03-03",
+        "rates": {
+          "weekday": { "single_double": 690, "extra_bed": 25 },
+          "weekend": { "single_double": 690, "extra_bed": 25 }
+        }
+      },
+      {
+        "description": "Mid to Late Ramadan",
+        "start": "03-04",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 890, "extra_bed": 50 },
+          "weekend": { "single_double": 890, "extra_bed": 50 }
+        }
+      },
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-27",
+        "rates": {
+          "weekday": { "single_double": 640, "extra_bed": 50 },
+          "weekend": { "single_double": 640, "extra_bed": 50 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-28",
+        "end": "04-07",
+        "rates": {
+          "weekday": { "single_double": 450, "extra_bed": 50 },
+          "weekend": { "single_double": 450, "extra_bed": 50 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_DAR_AL_EIMAN_INTERCONTINENTAL_001",
+    "hotel_info": {
+      "name": "Dar Al Eiman Intercontinental",
+      "aliases": ["Dar Al Eiman Intercontinental", "Dar Al Eiman", "Eiman Intercontinental"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": false,
+      "is_weekend_flat": false,
+      "default_extra_bed_rate": 160,
+      "surcharges": {
+        "views": {
+          "haram": 200,
+          "city": 0
+        },
+        "meals": {
+          "bb": 0,
+          "lunch_dinner": 175
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "Eid",
+        "start": "03-20",
+        "end": "03-22",
+        "rates": {
+          "weekday": { "single_double": 1460, "extra_bed": 160 },
+          "weekend": { "single_double": 1460, "extra_bed": 160 }
+        }
+      },
+      {
+        "description": "Shawwal",
+        "start": "03-23",
+        "end": "04-16",
+        "rates": {
+          "weekday": { "single_double": 1110, "extra_bed": 160 },
+          "weekend": { "single_double": 1230, "extra_bed": 160 }
+        }
+      }
+    ]
   }
 ]

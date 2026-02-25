@@ -9,18 +9,18 @@ const openai = new OpenAI({
 // 📋 THE GOLDEN LIST (Matches your GroupConfig Keys exactly)
 const OFFICIAL_REGISTRY = [
   // 🕌 MADINAH
-  "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower",
-  "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Iman InterContinental", 
-  "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", 
+  "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower","Grand Plaza Almadina",
+  "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Eiman Intercontinental", "Grand Plaza Badr Al Maqam",
+  "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", "Plaza Inn Ohud","Maysan Altaqwa",
   "Leader Al Muna Kareem", "Odst Al Madinah", "Artal International", "Zowar International", 
-  "Taiba Front", "Aqeeq Madinah", "Frontel Al Harithia", "Dallah Taibah", 
+  "Taiba Front", "Al Aqeeq", "Frontel Al Harithia", "Dallah Taibah", 
   "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Sky View","Province Al Sham", "Taif Al Nebras" ,
-  "Gulnar Taiba", "Emaar Al Manar","Frontel Al Harithia","Bir Al Eiman","Tara Al Hijra","Rama Al Madinah","Miramar",
+  "Gulnar Taiba", "Emaar Al Manar","Bir Al Eiman","Tara Al Hijra","Rama Al Madinah","Miramar","Arkan Almanar","Maysan Rehab Elmysk",
   
   // 🕋 MAKKAH (Clock Tower)
   "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
   "Raffles Makkah Palace", "Pullman Zamzam Makkah", "Movenpick Hajar Tower", 
-  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers","Time Ruba","Shaza Regency","Land Prenium",
+  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers","Time Ruba","Shaza Regency","Land Prenium","Taiba Madinah",
 
   // 🕋 MAKKAH (Haram/Jabal Omar)
   "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 
@@ -29,7 +29,7 @@ const OFFICIAL_REGISTRY = [
   "Le Meridien Makkah", "Waqf Uthman", "Safwat Al Medina","Courtyard By Marriott",
   "Courtyard By Marriot",
   "Courtyard Makkah",
-  "Courtyard Madinah","Mira Sud","majd al muhajireen","Maden Madinah","Zila Al Nazula",
+  "Courtyard Madinah","Mira Sud","majd al muhajireen","Maden Madinah","Zila Al Nazula","Anjum Makkah",
 
   // 🚌 MAKKAH (Aziziyah/Shuttle)
   "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", "Holiday Inn","Worth Peninsula",
@@ -52,12 +52,13 @@ async function sanitizeHotelNames(rawHotels) {
     - **Exact Match:** "Makkah Hotel" -> "Makkah Hotel"
     - **Fuzzy Match:** "Makah htl" -> "Makkah Hotel"
     - **No Hallucination:** If a hotel has a strong identifier (e.g., "Gulnar", "Manar", "Emaar"), DO NOT map it to a registry hotel (like "Taiba Front") just because they share a word.
-    - **Specific Brands:** "Gulnar Taiba" is a specific hotel. If it's not in the registry, just return "Gulnar Taiba" cleaned, do NOT change it to "Taiba Front".
+    - **Specific Brands:** "Gulnar Taiba" is a specific hotel. If it's not in the registry, just return "Gulnar Taiba" cleaned, do NOT change it to "Taiba Front"."Taibah Madinah" is also a different hotel
     - **Ambiguity:** - "Hilton" -> "Hilton Makkah Convention" (Default preference)
       - "Swiss" -> "Swissotel Makkah"
       - "Voco" -> "Voco Makkah"
       - "Anwar" -> "Anwar Al Madinah"
       - "Kiswa" -> "Kiswa Towers"
+      - "Al Harthia" -> "Frontel Al Harithia"
     - **Differentiation:**
       - "Makkah Hotel" and "Makkah Towers" are DIFFERENT. Respect the user's choice.
       - "Emaar Grand" vs "Emaar Elite" vs "Emaar Royal". Don't mix them.
