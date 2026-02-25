@@ -3,7 +3,7 @@
     "id": "HTL_VOCO_001",
     "hotel_info": {
       "name": "Voco Makkah",
-      "aliases": ["Voco","Vocco","Makkah Voco","Voco Hotel","Voco Towers"]
+      "aliases": ["Voco", "Vocco", "Makkah Voco", "Voco Hotel", "Voco Towers"]
     },
     "rate_rules": {
       "is_room_rate_flat": true,
@@ -28,38 +28,93 @@
     "seasons": [
       {
         "description": "Current Season",
-        "start": "01-01",
-        "end": "02-17",
-        "rates": {
-          "weekday": { "single_double": 190, "extra_bed": 0 },
-          "weekend": { "single_double": 190, "extra_bed": 0 }
-        }
-      },
-        {
-        "description": "Current Season",
-        "start": "02-18",
-        "end": "02-22",
-        "rates": {
-          "weekday": { "single_double": 400, "extra_bed": 0 },
-          "weekend": { "single_double": 400, "extra_bed": 0 }
-        }
-      },
-        {
-        "description": "Current Season",
         "start": "02-23",
         "end": "03-08",
         "rates": {
-          "weekday": { "single_double": 375, "extra_bed": 0 },
-          "weekend": { "single_double": 375, "extra_bed": 0 }
+          "weekday": { "single_double": 450, "extra_bed": 0 },
+          "weekend": { "single_double": 450, "extra_bed": 0 }
         }
       },
-        {
+      {
         "description": "Current Season",
         "start": "03-20",
         "end": "04-18",
         "rates": {
           "weekday": { "single_double": 180, "extra_bed": 0 },
           "weekend": { "single_double": 180, "extra_bed": 0 }
+        }
+      }
+    ]
+  },
+  {
+    "id": "HTL_ANJUM_001",
+    "hotel_info": {
+      "name": "Anjum Makkah",
+      "aliases": ["Anjum", "Anjum Hotel", "Anjum Makkah", "انجم"]
+    },
+    "rate_rules": {
+      "is_room_rate_flat": false,
+      "flat_till_pax": 2,
+      "max_pax": 4,
+      "meal_included": true,
+      "is_weekend_flat": false,
+      "default_extra_bed_rate": 175,
+      "surcharges": {
+        "views": {
+          "haram": 150,
+          "city": 0
+        },
+        "meals": {
+          "fb": 300,
+          "iftar_or_sohor": 0,
+          "bb": 0
+        }
+      }
+    },
+    "seasons": [
+      {
+        "description": "1 to 8 Ramadan (Approx. Feb 18 - Feb 25)",
+        "start": "02-18",
+        "end": "02-25",
+        "rates": {
+          "weekday": { "single_double": 1120, "extra_bed": 175 },
+          "weekend": { "single_double": 1220, "extra_bed": 175 }
+        }
+      },
+      {
+        "description": "9 to 19 Ramadan (Approx. Feb 26 - Mar 08)",
+        "start": "02-26",
+        "end": "03-08",
+        "rates": {
+          "weekday": { "single_double": 1370, "extra_bed": 175 },
+          "weekend": { "single_double": 1470, "extra_bed": 175 }
+        }
+      },
+      {
+        "description": "20 to 30 Ramadan (Last 10 Nights - Approx. Mar 09 - Mar 19)",
+        "start": "03-09",
+        "end": "03-19",
+        "rates": {
+          "weekday": { "single_double": 2650, "extra_bed": 500 },
+          "weekend": { "single_double": 2750, "extra_bed": 500 }
+        }
+      },
+      {
+        "description": "Eid / 30 Ramadan to 1 Shawwal (Approx. Mar 19 - Mar 20)",
+        "start": "03-19",
+        "end": "03-20",
+        "rates": {
+          "weekday": { "single_double": 1295, "extra_bed": 250 },
+          "weekend": { "single_double": 1395, "extra_bed": 250 }
+        }
+      },
+      {
+        "description": "Post-Ramadan (Mar 21 - Apr 07)",
+        "start": "03-21",
+        "end": "04-07",
+        "rates": {
+          "weekday": { "single_double": 445, "extra_bed": 90 },
+          "weekend": { "single_double": 495, "extra_bed": 90 }
         }
       }
     ]

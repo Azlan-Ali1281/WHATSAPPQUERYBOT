@@ -20,7 +20,7 @@ const OFFICIAL_REGISTRY = [
   // 🕋 MAKKAH (Clock Tower)
   "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
   "Raffles Makkah Palace", "Pullman Zamzam Makkah", "Movenpick Hajar Tower", 
-  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers",
+  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers","Time Ruba","Shaza Regency","Land Prenium",
 
   // 🕋 MAKKAH (Haram/Jabal Omar)
   "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 

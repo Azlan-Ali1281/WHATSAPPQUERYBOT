@@ -761,11 +761,16 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
     console.log('Text:', finalProcessingText)
 
 if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
-      // ============================================================
+    
+// ============================================================
       // 🛡️ 1. ROBUST PRE-PROCESSING
       // ============================================================
-    // ✅ STEP A: Fix Typos & Normalize
+      // ✅ STEP A: Fix Typos & Normalize
       let preProcessedText = finalProcessingText
+        // 🛡️ FIX 27-C: SMART SUFFIX REMOVER (Moved to the VERY TOP)
+        .replace(/(\d{1,2})(st|nd|rd|th)\b/gi, '$1')
+        .replace(/\bof\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1')
+
         .replace(/(\d+)([a-zA-Z]+)/g, '$1 $2') // 👈 NEW: Turns "2trp" into "2 trp" and "3dbl" into "3 dbl"
         .replace(/\bcheck\s*inn\b/gi, 'check in') 
         .replace(/\bmeridian\b/gi, 'meridien') // 👈 THE TYPO FIX
@@ -777,8 +782,12 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         // 🛡️ FIX 4: CHATTER CLEANER (Removed 'check' so date anchors survive)
         .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|price|prices|amount|cost)\b/gi, ' ')
         
-        // 🛡️ FIX 4.5: KILL "HOTEL MAK:" LABELS (Prevents them from becoming orphan hotels)
+// 🛡️ FIX 4.5: KILL "HOTEL MAK:" LABELS (Prevents them from becoming orphan hotels)
         .replace(/\bhotel\s*(mak|med|makkah|madina|madinah)\s*[:\-]?\s*/gi, '\n')
+        
+        // 🛡️ FIX 4.6: "OR SIMILAR" VAPORIZER 👈 ADD THIS NEW BLOCK!
+        // Deletes client padding so "Land premium or similar" cleanly becomes "Land premium"
+        .replace(/\b(or\s+similar|or\s+equivalent|and\s+similar|any\s+similar|similar)\b/gi, ' ')
         
         // 🛡️ FIX: KILL ZIP CODES (Prevents "Swiss 21955" from being deleted later)
         .replace(/\b\d{5}\b/g, ' ') 
@@ -789,23 +798,25 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         // Standardize to "LAST ASHRA" so the AI recognizes it easily
         .replace(/\b(last\s*ashra|last\s*10\s*days\s*of\s*ramadan|last\s*ashrah)\b/gi, 'LAST ASHRA')
         
-        // Fix "1st of March" -> "1 March"
-        .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
-        .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
-
-        // Fix "1st of March" -> "1 March"
-        .replace(/(\d+)(?:st|nd|rd|th)?\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
-        .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
-
         // 🛡️ FIX 27: COMPRESSED DATE NORMALIZER (e.g. 28mar-04apr -> 28 mar to 04 apr)
         .replace(/(\d{1,2})(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 $2')
         .replace(/(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\s*-\s*(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, '$1 to $2')
 
-        // 🛡️ FIX 26: HYPHEN DATE NORMALIZER
+        // 🛡️ FIX 27-B: SMART DATE SPACER (The "11 April / 2011" Fix)
+        .replace(/(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)(?:\s*\r?\n+\s*|\s+)(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)/gi, '$1 to $2')
 
         // 🛡️ FIX 26: HYPHEN DATE NORMALIZER
         .replace(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-]*(\d{2})\b/gi, '$1 $2 20$3')
         .replace(/(\d{1,2})[\s-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-]*(\d{4})\b/gi, '$1 $2 $3')
+
+        // 🛡️ FIX 27-D: SLASHED DATE CONVERTER (The "31/03/26" Fix)
+        // Resolves DD/MM/YY to "31 Mar 2026" early so it doesn't get shredded by later rules
+        .replace(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})\b/g, (m, d, mth, y) => {
+             if (y.length === 2) y = "20" + y;
+             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+             const mIdx = parseInt(mth) - 1;
+             return mIdx >= 0 && mIdx < 12 ? `${d} ${months[mIdx]} ${y}` : m;
+        })
 
         // 🛡️ FIX 26-B: YEAR-ROOM SEPARATOR (Critical)
         // Turns "2026 TRIPLE" -> "2026 \n TRIPLE"
@@ -819,8 +830,6 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       );
 
       // 🛡️ FIX 7: THE HOTEL GRENADE (Refined)
-      // REMOVED: manar, madinah, khalil (to protect "Emaar Al Manar", "Anwar Madinah")
-      // KEPT: hidayah, miramar, concord, vision (Stand-alone names)
       const brandsRegex = /\b(hilton|swiss|voco|pullman|anwar|saja|kiswa|movenpick|fairmont|rotana|emaar|dar|tawhid|conrad|sheraton|marriott|le meridien|clock|royal|majestic|safwah|shaza|millennium|oberoi|miramar|hidayah|hidaya|iman|harmony|leader|mubarak|wissam|concord|vision|ruve|nozol|diafa|shourfah)\b/gi;
       preProcessedText = preProcessedText.replace(brandsRegex, '\n$1');
 
@@ -830,8 +839,10 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           '\n$1 '
       );
       
+      // 🛡️ FIX 8-B: THE ROOM EXPLODER
+      // Updated \s* to [ \t]* so it doesn't cross newlines and drag random numbers into room types
       preProcessedText = preProcessedText.replace(
-          /(\b\d+\s*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|qued|quint|suite))/gi,
+          /(\b\d+[ \t]*(?:room|bed|pax|guest|dbl|double|trp|triple|quad|qued|quint|suite))/gi,
           '\n$1'
       );
 
@@ -839,18 +850,22 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       preProcessedText = normalizeMultiLineDateRange(preProcessedText);
 
       // ✅ STEP C: Standard replacements
-      // ... (Keep the rest of your Step C regexes here exactly as they were) ...
       preProcessedText = preProcessedText
         .replace(/(\d{1,2})\s*[\/-]\s*(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi, '$1 to $2 $3')
+        
+        // 🛡️ Swap 1: DD/MM/YYYY goes FIRST to prevent DD/MM from cannibalizing it
+        .replace(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/g, (m, d, mth, y) => {
+             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+             return `${d} ${months[parseInt(mth)-1]} ${y}`;
+        })
+        
+        // 🛡️ Swap 2: DD/MM goes SECOND
         .replace(/\b(\d{1,2})[\/-](\d{1,2})\b/g, (match, d, m) => {
             if (parseInt(m) > 12) return `${d} to ${m}`; 
             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
             return `${d} ${months[parseInt(m)-1]}`;
         })
-        .replace(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/g, (m, d, mth, y) => {
-             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-             return `${d} ${months[parseInt(mth)-1]} ${y}`;
-        })
+        
         .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[ \t]*(\d{1,2})(?!\s*(?:room|bed|pax|guest|dbl|trp|quad|quint))\b/gi, '$2 $1');
 
       let lines = preProcessedText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -1283,7 +1298,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             }
         }
 
-        // --- SANITIZATION & LOOP ---
+// --- SANITIZATION & LOOP ---
 
         let rawSanitizedResults = await sanitizeHotelNames(potentialHotels);
         
@@ -1292,14 +1307,27 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         const finalSanitizedMap = {}; 
 
         potentialHotels.forEach((raw, index) => {
-            const matchedName = rawSanitizedResults[index];
+            // Safely grab the matched name, avoiding undefined errors if the array acts weird
+            const matchedName = (Array.isArray(rawSanitizedResults) && rawSanitizedResults[index]) ? rawSanitizedResults[index] : null;
             
             // Search the ORIGINAL text lines to find stripped keywords
-            const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah|nabras|nebras|taiba|sky\s*view/i.test(originalLine);
+            const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;
             
-            // Validation Gate Logic: Keep if DB match OR strong keyword
-            if (matchedName || (hasStrongKeyword && raw.length > 3)) {
-                const finalName = matchedName || raw; 
+            // 🛡️ FIX 1: MASSIVELY EXPANDED STRONG KEYWORDS
+            // Added: arkan, manar, plaza, palace, qasr, maqam, resort, boutique
+            const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah|nabras|nebras|taiba|sky\s*view|arkan|manar|plaza|palace|qasr|maqam|resort|boutique/i.test(originalLine);
+            
+            // 🛡️ FIX 2: THE BULLETPROOF FALLBACK (The "Perfect Name" Detector)
+            // If the sanitizer fails, but the text is 2-5 words, has NO numbers, and NO room/meal keywords, it IS a hotel!
+            const isJunkHotel = /room|bed|pax|guest|dbl|double|trp|triple|quad|quint|suite|breakfast|bb|ro|hb|fb|meal|view|haram|city|kaaba|night|days/i.test(raw);
+            const hasNumbers = /\d/.test(raw);
+            const wordCount = raw.trim().split(/\s+/).length;
+            const looksLikePerfectHotelName = !hasNumbers && !isJunkHotel && wordCount >= 2 && wordCount <= 5;
+
+            // Validation Gate Logic: Keep if DB match OR strong keyword OR looks perfectly like a hotel
+            if ((matchedName && matchedName !== 'DROP_ME') || (hasStrongKeyword && raw.length > 3) || looksLikePerfectHotelName) {
+                // If matchedName is valid, use it. Otherwise safely fall back to the raw name.
+                const finalName = (matchedName && matchedName !== 'DROP_ME') ? matchedName : raw; 
                 sanitizedHotels.push(finalName);
                 finalSanitizedMap[raw] = finalName;
             } else {
@@ -1778,8 +1806,8 @@ try {
                     const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
                     
                     // 🛡️ Heavily expanded junk word list
-                    const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b|recheck|before|final|list|check|please|kindly|wait|let me|checking|dear/i.test(firstLine);
-                    
+// 🛡️ THE FIX: Added Ramadan & Meal terms to block them from becoming fake hotels
+                const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b|recheck|before|final|list|check|please|kindly|wait|let me|checking|dear|iftar|sahour|suhoor|sohour|breakfast|lunch|dinner|meal|inclusive|inc\b|with|without|only/i.test(firstLine);                    
                     // Now test the CLEANED name (which will just be "miramar")
                     if (firstLine.length >= 3 && !isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
                         newHotel = firstLine; 
