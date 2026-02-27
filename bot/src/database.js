@@ -18,6 +18,35 @@ db.exec(`
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 🛡️ NEW: Unified Groups Table
+    CREATE TABLE IF NOT EXISTS groups (
+        group_id TEXT PRIMARY KEY,
+        name TEXT DEFAULT 'Unknown', -- 👈 NEW COLUMN
+        role TEXT NOT NULL DEFAULT 'UNKNOWN',
+        client_code TEXT DEFAULT 'REQ',
+        handled_hotels TEXT DEFAULT '["ALL"]',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 🛡️ NEW: Client Smart Limits Table
+    CREATE TABLE IF NOT EXISTS client_limits (
+        group_id TEXT PRIMARY KEY,
+        max_child_queries INTEGER DEFAULT 6,
+        max_hotels_per_date INTEGER DEFAULT 4,
+        max_date_ranges INTEGER DEFAULT 3,
+        max_room_types INTEGER DEFAULT 2,
+        max_daily_queries INTEGER DEFAULT 30,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 🛡️ NEW: Employees Table (Ignored Users)
+    CREATE TABLE IF NOT EXISTS employees (
+        jid TEXT PRIMARY KEY,
+        name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS child_queries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         parent_id INTEGER,
@@ -70,6 +99,9 @@ db.exec(`
     );
 `);
 
+// Safely add new columns to existing tables
+    try { db.exec(`ALTER TABLE groups ADD COLUMN limit_tier TEXT DEFAULT 'DEFAULT';`); } catch (e) {}
+    try { db.exec(`ALTER TABLE groups ADD COLUMN name TEXT DEFAULT 'Unknown';`); } catch (e) {} // 👈 NEW
 // ======================================================
 // 🛡️ DATABASE MIGRATION (MEAL & VIEW COLUMN GUARD)
 // ======================================================
@@ -88,6 +120,7 @@ try {
 } catch (e) {
     console.error("⚠️ Migration failed:", e.message);
 }
+
 
 // ======================================================
 // 🛡️ INITIALIZE STARTING RULES (RUN ONCE)
@@ -158,6 +191,31 @@ const getContextQuery = db.prepare(`
     WHERE vr.sent_message_id = ?
 `);
 
+// 🛡️ NEW: Limit Tiers (Packages) Table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS limit_tiers (
+            tier_name TEXT PRIMARY KEY,
+            max_child_queries INTEGER DEFAULT 6,
+            max_hotels_per_date INTEGER DEFAULT 4,
+            max_date_ranges INTEGER DEFAULT 3,
+            max_room_types INTEGER DEFAULT 2,
+            max_daily_queries INTEGER DEFAULT 30
+        );
+        
+        -- Insert a standard DEFAULT tier so the bot never crashes
+        INSERT OR IGNORE INTO limit_tiers (tier_name, max_child_queries, max_hotels_per_date, max_date_ranges, max_room_types, max_daily_queries)
+        VALUES ('DEFAULT', 6, 4, 3, 2, 30);
+    `);
+
+    // Safely add the 'limit_tier' column to the existing 'groups' table if it doesn't exist
+    try {
+        db.exec(`ALTER TABLE groups ADD COLUMN limit_tier TEXT DEFAULT 'DEFAULT';`);
+    } catch (e) {
+        // Ignore error if column already exists
+    }
+
+
+
 const updateStatus = db.prepare(`
     UPDATE vendor_requests 
     SET status = @status 
@@ -176,6 +234,197 @@ const saveQuote = db.prepare(`
 function getClientCode(groupId) {
     const res = db.prepare("SELECT client_code FROM group_configs WHERE group_id = ?").get(groupId);
     return res ? res.client_code : 'DEFAULT';
+}
+
+
+// 6. Get Full Group Info (For Owner Debugging)
+function getGroupInfo(groupId) {
+    const group = db.prepare(`SELECT * FROM groups WHERE group_id = ?`).get(groupId);
+    if (!group) return null;
+    
+    const info = { ...group };
+    if (group.role === 'CLIENT') {
+        info.limits = getClientLimits(groupId);
+        info.daily_count = getDailyQueryCount(groupId);
+    }
+    return info;
+}
+
+
+// ============================================================
+// 🛡️ TIER-BASED SMART LIMITS
+// ============================================================
+
+// ============================================================
+// 🛡️ TIER-BASED SMART LIMITS
+// ============================================================
+
+// 1. Get Limits based on the client's assigned Tier
+function getClientLimits(groupId) {
+    // Check which tier the group belongs to
+    const group = db.prepare(`SELECT limit_tier FROM groups WHERE group_id = ?`).get(groupId);
+    const tierName = (group && group.limit_tier) ? group.limit_tier : 'DEFAULT';
+    
+    // Fetch the limits for that tier from the NEW table
+    const limits = db.prepare(`SELECT * FROM limit_tiers WHERE tier_name = ?`).get(tierName);
+    
+    if (limits) return limits;
+    
+    // Absolute safety fallback
+    return { max_child_queries: 6, max_hotels_per_date: 4, max_date_ranges: 3, max_room_types: 2, max_daily_queries: 30 };
+}
+
+// ============================================================
+// 👨‍💼 INTERNAL EMPLOYEES
+// ============================================================
+
+// 1. Add or Update an Employee
+function upsertEmployee(jid, name) {
+    const stmt = db.prepare(`
+        INSERT INTO employees (jid, name) 
+        VALUES (?, ?) 
+        ON CONFLICT(jid) DO UPDATE SET name = ?
+    `);
+    stmt.run(jid, name, name);
+}
+
+// 2. Check if a User is an Employee
+function isEmployeeDB(jid) {
+    if (!jid) return false;
+    const row = db.prepare(`SELECT 1 FROM employees WHERE jid = ?`).get(jid);
+    return !!row; // Returns true if found, false if not
+}
+
+// 2. Create or Update a Limit Tier (e.g., VIP, PRO, BASIC)
+function upsertLimitTier(tierName, limits) {
+    const stmt = db.prepare(`
+        INSERT INTO limit_tiers (tier_name, max_child_queries, max_hotels_per_date, max_date_ranges, max_room_types, max_daily_queries)
+        VALUES (@tier_name, @max_child, @max_hotel, @max_date, @max_room, @max_daily)
+        ON CONFLICT(tier_name) DO UPDATE SET
+            max_child_queries = @max_child,
+            max_hotels_per_date = @max_hotel,
+            max_date_ranges = @max_date,
+            max_room_types = @max_room,
+            max_daily_queries = @max_daily
+    `);
+    
+    stmt.run({
+        tier_name: tierName.toUpperCase(),
+        max_child: limits.max_child_queries || 6,
+        max_hotel: limits.max_hotels_per_date || 4,
+        max_date: limits.max_date_ranges || 3,
+        max_room: limits.max_room_types || 2,
+        max_daily: limits.max_daily_queries || 30
+    });
+}
+
+// 3. Assign a Tier to a Client Group
+function assignTierToGroup(groupId, tierName) {
+    const stmt = db.prepare(`UPDATE groups SET limit_tier = ? WHERE group_id = ?`);
+    stmt.run(tierName.toUpperCase(), groupId);
+}
+
+// ============================================================
+// 👥 UNIFIED GROUP ROUTING (Frontend-Ready)
+// ============================================================
+
+// 1. Upsert Group (Creates or Updates a group's role and data)
+function upsertGroup(groupId, role, clientCode = 'REQ', handledHotels = ['ALL'], name = 'Unknown') {
+    const stmt = db.prepare(`
+        INSERT INTO groups (group_id, name, role, client_code, handled_hotels, updated_at) 
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) 
+        ON CONFLICT(group_id) DO UPDATE SET 
+            name = ?,
+            role = ?, 
+            client_code = ?, 
+            handled_hotels = ?,
+            updated_at = CURRENT_TIMESTAMP
+    `);
+    
+    const hotelsStr = Array.isArray(handledHotels) ? JSON.stringify(handledHotels) : handledHotels;
+    
+    // Pass the name twice (once for INSERT, once for UPDATE)
+    stmt.run(groupId, name, role, clientCode, hotelsStr, name, role, clientCode, hotelsStr);
+}
+
+// 2. Get Group Role
+function getGroupRoleDB(groupId) {
+    const row = db.prepare(`SELECT role FROM groups WHERE group_id = ?`).get(groupId);
+    return row ? row.role : 'UNKNOWN';
+}
+
+// 3. Get Client Code (Only if they are a client)
+function getClientCodeDB(groupId) {
+    const row = db.prepare(`SELECT client_code FROM groups WHERE group_id = ? AND role = 'CLIENT'`).get(groupId);
+    return row ? row.client_code : 'REQ';
+}
+
+// 4. Get All Owner Groups (Replaces getOwnerGroups from config)
+function getOwnerGroupsDB() {
+    const rows = db.prepare(`SELECT group_id FROM groups WHERE role = 'OWNER'`).all();
+    return rows.map(r => r.group_id);
+}
+
+// 5. Get Vendors for a specific hotel
+function getVendorsForHotelDB(hotelName) {
+    const rows = db.prepare(`SELECT group_id, handled_hotels FROM groups WHERE role = 'VENDOR'`).all();
+    const matchedVendors = [];
+    const hName = hotelName.toLowerCase();
+
+    for (const row of rows) {
+        try {
+            const hotels = JSON.parse(row.handled_hotels);
+            if (hotels.includes('ALL')) {
+                matchedVendors.push(row.group_id);
+                continue;
+            }
+            // Check if any handled brand matches the requested hotel name
+            if (hotels.some(brand => hName.includes(brand.toLowerCase()))) {
+                matchedVendors.push(row.group_id);
+            }
+        } catch (e) {
+            console.error("Failed to parse vendor hotels for", row.group_id);
+        }
+    }
+    return matchedVendors;
+}
+
+
+// 2. Set/Update Limits for a specific group
+function setClientLimits(groupId, limits) {
+    const stmt = db.prepare(`
+        INSERT INTO client_limits (group_id, max_child_queries, max_hotels_per_date, max_date_ranges, max_room_types, max_daily_queries, updated_at)
+        VALUES (@group_id, @max_child_queries, @max_hotels_per_date, @max_date_ranges, @max_room_types, @max_daily_queries, CURRENT_TIMESTAMP)
+        ON CONFLICT(group_id) DO UPDATE SET
+            max_child_queries = @max_child_queries,
+            max_hotels_per_date = @max_hotels_per_date,
+            max_date_ranges = @max_date_ranges,
+            max_room_types = @max_room_types,
+            max_daily_queries = @max_daily_queries,
+            updated_at = CURRENT_TIMESTAMP
+    `);
+    
+    stmt.run({
+        group_id: groupId,
+        max_child_queries: limits.max_child_queries,
+        max_hotels_per_date: limits.max_hotels_per_date,
+        max_date_ranges: limits.max_date_ranges,
+        max_room_types: limits.max_room_types,
+        max_daily_queries: limits.max_daily_queries
+    });
+}
+
+// 3. Count how many Parent Queries this group made TODAY
+function getDailyQueryCount(groupId) {
+    // Uses SQLite 'localtime' to count queries made since midnight
+    const stmt = db.prepare(`
+        SELECT COUNT(*) as count 
+        FROM parent_queries 
+        WHERE remote_jid = ? 
+        AND date(created_at, 'localtime') = date('now', 'localtime')
+    `);
+    const result = stmt.get(groupId);
+    return result ? result.count : 0;
 }
 
 function setGroupClientCode(groupId, clientCode) {
@@ -226,6 +475,13 @@ function getLastActiveRequest(vendorGroupId) {
     AND status IN ('SENT', 'PENDING')
     ORDER BY id DESC LIMIT 1
   `).get(vendorGroupId);
+}
+
+// 7. Find Group ID by Client Code (Short ID)
+function getGroupIdByClientCode(clientCode) {
+    // Looks for a CLIENT that matches the short code (e.g., '31')
+    const row = db.prepare(`SELECT group_id FROM groups WHERE client_code = ? AND role = 'CLIENT'`).get(clientCode.toString());
+    return row ? row.group_id : null;
 }
 
 // ======================================================
@@ -280,7 +536,23 @@ module.exports = {
     getClientCode,
     setGroupClientCode,
     recallLastParentQueries,
+    // ADD THESE THREE:
+    getClientLimits,
+    getGroupIdByClientCode, // 👈 ADD THIS
+    setClientLimits,
+    getDailyQueryCount,
     recallLastChildQueries,
     getLastActiveRequest,
+    upsertGroup,
+    getGroupRoleDB,
+    getClientCodeDB,
+    getGroupInfo,          // 👈 MAKE SURE THIS IS HERE
+    getGroupIdByClientCode, // 👈 AND THIS
+    getOwnerGroupsDB,
+    getVendorsForHotelDB,
+    upsertLimitTier,     // 👈 NEW
+    assignTierToGroup,   // 👈 NEW
+    upsertEmployee, // 👈 NEW
+    isEmployeeDB,    // 👈 NEW
     getQuoteByReqId: (reqId) => getQuoteForSending.get(reqId),
 };

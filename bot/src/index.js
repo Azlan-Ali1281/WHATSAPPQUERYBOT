@@ -18,7 +18,15 @@ const {
     updateRequestStatus, // 👈 ADD THIS
     recallLastParentQueries, // 👈 ADD THIS
     recallLastChildQueries,   // 👈 ADD THIS
-    getQuoteByReqId // 👈 ADD THIS
+    getQuoteByReqId,
+    isEmployeeDB, // 👈 ADD THIS
+    getClientLimits,        // 👈 NEW
+    setClientLimits,        // 👈 NEW
+    getDailyQueryCount, // 👈 ADD THIS
+    getGroupRoleDB,         // 👈 NEW
+    getOwnerGroupsDB,       // 👈 NEW
+    getVendorsForHotelDB,   // 👈 NEW
+    getClientCodeDB         // 👈 NEW
 } = require('./database');
 
 // ✅ CORRECT (Relative to index.js)
@@ -31,26 +39,8 @@ const qrcode = require('qrcode-terminal')
 const { segmentClientQuery } = require('./aiBlockSegmenter')
 const { parseClientMessageWithAI } = require('./aiClientParser')
 const { classifyMessage } = require('./messageClassifier')
-const { isEmployee } = require('./employeeConfig')
 const { sanitizeHotelNames } = require('./aiSanitizer');
 
-const {
-  getGroupRole,
-  getVendorsForHotel,
-  getOwnerGroups,
-  getClientCode
-} = require('./groupConfig')
-
-// ======================================================
-// 🛡️ SAFETY LIMITS (Circuit Breaker)
-// ======================================================
-const LIMITS = {
-  MAX_TOTAL_REQUESTS: 6, // Hard cap: No more than 15 vendor msgs per user msg
-  MAX_DATE_RANGES: 3,     // Max distinct date ranges (e.g. 1-5 Feb, 10-12 Feb...)
-  MAX_HOTELS: 4,          // Max distinct hotels per query
-  MAX_ROOM_TYPES: 2,       // Max distinct room types per hotel
-  MAX_VENDORS_PER_HOTEL: 6 // 🛡️ NEW: How many vendors get the blast?
-};
 
 const {
   createParent,
@@ -676,7 +666,7 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
         return; // Stops the bot from processing this message
     }
 
-    const role = getGroupRole(groupId);
+    const role = getGroupRoleDB(groupId);
 
 // ============================================================
     // 👑 COMMAND MODE: OWNER OVERRIDE (Bypasses Employee Check)
@@ -725,9 +715,122 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
         }
         return;
     }
+// 🚀 NEW COMMANDS: /tier (Manage Limit Packages)
+    if (role === 'OWNER' && rawText.trim().toLowerCase().startsWith('/tier')) {
+        const parts = rawText.trim().split(/\s+/);
+        const action = parts[1]?.toLowerCase(); 
+        
+        const { upsertLimitTier, assignTierToGroup } = require('./database');
 
+        // COMMAND 1: Create/Update a Tier -> /tier set VIP daily=100 child=15 hotel=5
+        if (action === 'set' && parts.length >= 3) {
+            const tierName = parts[2].toUpperCase();
+            
+            // Start with defaults
+            const limits = { max_daily_queries: 30, max_child_queries: 6, max_date_ranges: 3, max_room_types: 2, max_hotels_per_date: 4 };
+
+            // Parse updates
+            for (let i = 3; i < parts.length; i++) {
+                const [key, val] = parts[i].split('=');
+                const num = parseInt(val, 10);
+                if (isNaN(num)) continue;
+
+                if (key === 'daily') limits.max_daily_queries = num;
+                if (key === 'child') limits.max_child_queries = num;
+                if (key === 'date') limits.max_date_ranges = num;
+                if (key === 'room') limits.max_room_types = num;
+                if (key === 'hotel') limits.max_hotels_per_date = num;
+            }
+
+            upsertLimitTier(tierName, limits);
+            await sock.sendMessage(groupId, { text: `✅ *TIER CREATED/UPDATED: [${tierName}]*\nDaily: ${limits.max_daily_queries} | Child/Msg: ${limits.max_child_queries} | Dates: ${limits.max_date_ranges} | Hotels: ${limits.max_hotels_per_date} | Rooms: ${limits.max_room_types}` }, { quoted: msg });
+            return;
+        }
+
+// COMMAND 2: Assign Tier to Group -> /tier assign 31 VIP
+        if (action === 'assign' && parts.length >= 4) {
+            let targetInput = parts[2]; // This could be '31' or '120363...@g.us'
+            const tierName = parts[3].toUpperCase();
+            
+            const { assignTierToGroup, getGroupIdByClientCode } = require('./database');
+            
+            let targetGroupId = targetInput;
+
+            // If the input doesn't look like a WhatsApp ID, assume it's a short Client Code
+            if (!targetInput.includes('@g.us')) {
+                const resolvedId = getGroupIdByClientCode(targetInput);
+                
+                if (!resolvedId) {
+                    await sock.sendMessage(groupId, { text: `❌ Could not find any client with the code: *${targetInput}*` }, { quoted: msg });
+                    return;
+                }
+                targetGroupId = resolvedId;
+            }
+            
+            assignTierToGroup(targetGroupId, tierName);
+            await sock.sendMessage(groupId, { text: `✅ *TIER ASSIGNED!*\nClient: ${targetInput}\nGroup: ${targetGroupId}\nNow operating on the [${tierName}] package limits.` }, { quoted: msg });
+            return;
+        }
+
+        await sock.sendMessage(groupId, { text: `❌ *Invalid Command*\n\n*To Create a Tier:*\n/tier set VIP daily=100 child=15 date=5 hotel=5\n\n*To Assign a Tier:*\n/tier assign 120363... VIP` }, { quoted: msg });
+        return;
+    }
+
+    // 🚀 NEW COMMAND: /info [GroupId] (Checks Database Status)
+// 🚀 NEW COMMAND: /info [GroupId or ClientCode] (Checks Database Status)
+    if (role === 'OWNER' && rawText.trim().toLowerCase().startsWith('/info')) {
+        const parts = rawText.trim().split(/\s+/);
+        const targetInput = parts[1] || groupId; 
+        
+        const { getGroupInfo, getGroupIdByClientCode } = require('./database');
+        
+        let targetGroupId = targetInput;
+
+        // If it doesn't look like a WhatsApp ID, assume it's a short Client Code
+        if (!targetInput.includes('@g.us') && parts[1]) {
+            const resolvedId = getGroupIdByClientCode(targetInput);
+            
+            if (!resolvedId) {
+                await sock.sendMessage(groupId, { text: `❌ Could not find any client with the code: *${targetInput}*` }, { quoted: msg });
+                return;
+            }
+            targetGroupId = resolvedId;
+        }
+
+        const info = getGroupInfo(targetGroupId);
+
+        if (!info) {
+            await sock.sendMessage(groupId, { text: `❌ Group not found in database.\nID: ${targetGroupId}` }, { quoted: msg });
+            return;
+        }
+
+        let report = `📊 *DATABASE INFO*\n📍 *ID:* ${targetGroupId}\n📝 *Name:* ${info.name}\n🎭 *Role:* ${info.role}\n`;
+        if (info.limit_tier) report += `💎 *Tier:* [${info.limit_tier}]\n`;
+
+        if (info.role === 'CLIENT') {
+            report += `🏷️ *Client Code:* ${info.client_code}\n`;
+            report += `📈 *Usage Today:* ${info.daily_count} / ${info.limits.max_daily_queries} queries\n`;
+            report += `⚙️ *Limits:*\n  - Child/Msg: ${info.limits.max_child_queries}\n  - Dates: ${info.limits.max_date_ranges}\n  - Hotels: ${info.limits.max_hotels_per_date}\n  - Rooms: ${info.limits.max_room_types}`;
+        } 
+        else if (info.role === 'VENDOR') {
+            try {
+                const hotels = JSON.parse(info.handled_hotels);
+                report += `🏨 *Handled Hotels:*\n  - ${hotels.join('\n  - ')}`;
+            } catch(e) {
+                report += `🏨 *Handled Hotels:* Error reading data.`;
+            }
+        }
+
+        await sock.sendMessage(groupId, { text: report }, { quoted: msg });
+        return;
+    }
+    
     // Now it is safe to block employees from sending normal hotel queries
-    if (isEmployee(senderId)) return 
+// 🛡️ Filter out messages from Internal Employees
+    if (isEmployeeDB(senderId)) {
+        console.log(`Ignoring message from employee: ${senderId}`);
+        return;
+    }
 
     // 🧠 CONVERSATIONAL REPAIR (Fixed)
     const { getPendingQuestion, clearPendingQuestion } = require('./queryStore');
@@ -761,8 +864,33 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
     console.log('Text:', finalProcessingText)
 
 if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
-    
-// ============================================================
+      
+      // ============================================================
+      // 🛑 SMART LIMITS: DAILY PARENT BLOCKER
+      // ============================================================
+      const clientLimits = getClientLimits(groupId);
+      const dailyCount = getDailyQueryCount(groupId);
+        if (dailyCount >= clientLimits.max_daily_queries) {
+          console.log(`🚫 Daily limit reached for ${groupId} (${dailyCount}/${clientLimits.max_daily_queries})`);
+          
+          // 🛡️ Fetch friendly names for the owner alert
+          const { getGroupInfo } = require('./database');
+          const groupInfo = getGroupInfo(groupId);
+          const displayName = groupInfo ? `${groupInfo.name} (${groupInfo.client_code})` : groupId;
+
+          await sock.sendMessage(groupId, { 
+              text: `⚠️ *Daily Limit Reached*\n\nYou have used your maximum of ${clientLimits.max_daily_queries} queries for today. Please wait until tomorrow or contact support for an upgrade.` 
+          }, { quoted: msg });
+          
+          // Notify the owners with friendly names
+          for (const owner of getOwnerGroupsDB()) {
+              await sock.sendMessage(owner, { 
+                  text: `🚦 *CLIENT CAPPED*\nClient: *${displayName}*\nHit their daily limit of *${clientLimits.max_daily_queries}* queries.` 
+              });
+          }
+          return; 
+      }      
+      // ============================================================
       // 🛡️ 1. ROBUST PRE-PROCESSING
       // ============================================================
       // ✅ STEP A: Fix Typos & Normalize
@@ -1083,7 +1211,13 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       const crossMonthRegex = /(\d{1,2})\s*([a-z]{3,9})[\s-]*(?:to|[-/]|and)[\s-]*(\d{1,2})\s*([a-z]{3,9})/gi;
       while ((m = crossMonthRegex.exec(effectiveText)) !== null) globalDateRanges.push(`${m[1]} ${m[2]} to ${m[3]} ${m[4]}`);
 
+      // 🛑 SMART LIMIT: Trim Global Dates
+      if (globalDateRanges.length > clientLimits.max_date_ranges) {
+          globalDateRanges.length = clientLimits.max_date_ranges; 
+      }
+
       let globalHotels = [];
+
       blocks.forEach(b => globalHotels.push(...(b.hotels || [])));
       globalHotels = [...new Set(globalHotels)]; 
 
@@ -1189,25 +1323,15 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           return;
       }
       clearPendingQuestion(groupId);
-      // ============================================================
+// ============================================================
       // 🛡️ 3. MAIN PROCESSING LOOP
       // ============================================================
+      // 🛑 SMART LIMIT: Initialize Child Query Counters
       let requestCount = 0;
       let limitReached = false;
 
-      let totalUniqueHotels = new Set();
-      blocks.forEach(b => {
-          (b.hotels || []).forEach(h => totalUniqueHotels.add(h.toLowerCase()));
-      });
-      
-      if (totalUniqueHotels.size > LIMITS.MAX_HOTELS) {
-          for (const owner of getOwnerGroups()) {
-              await sock.sendMessage(owner, { text: `⚠️ *SAFETY WARNING*: Query has ${totalUniqueHotels.size} hotels (Limit: ${LIMITS.MAX_HOTELS}). Limiting output.` });
-          }
-      }
+     blockLoop: for (const block of blocks) {
 
-      blockLoop: for (const block of blocks) {
-        if (limitReached) break blockLoop;
 
         let blockDateList = [];
         if (block.dates) {
@@ -1229,19 +1353,20 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           blockDateList = mergedDates;
         }
 
-        if (blockDateList.length > LIMITS.MAX_DATE_RANGES) {
-             blockDateList = blockDateList.slice(0, LIMITS.MAX_DATE_RANGES);
+        // 🛑 SMART LIMIT: Trim Block Dates
+        if (blockDateList.length > clientLimits.max_date_ranges) {
+             blockDateList = blockDateList.slice(0, clientLimits.max_date_ranges);
         }
 
         if (blockDateList.length === 0 && globalDateRanges.length > 0) blockDateList = globalDateRanges;
+
 
         let splitHotels = [];
         (block.hotels || []).forEach(h => {
              splitHotels.push(...h.split(/\s*\/\s*|\s+or\s+|\s*&\s*|,\s*|\n/i).map(s => s.trim()).filter(Boolean));
         });
         
-        if (splitHotels.length > LIMITS.MAX_HOTELS) splitHotels = splitHotels.slice(0, LIMITS.MAX_HOTELS);
-        
+    
 
         // 1. Split BOTH the cleaned text and the original text into lines
         const cleanedLines = preProcessedText.split('\n').map(l => l.trim());
@@ -1334,9 +1459,13 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
                 console.log(`🗑️ Dropping non-hotel junk: "${raw}"`);
             }
         });
-
         // 2. Remove Duplicates & Maintain "Again/Same" logic
         sanitizedHotels = [...new Set(sanitizedHotels)];
+
+        // 🛑 SMART LIMIT: Trim Max Hotels Per Message
+        if (sanitizedHotels.length > clientLimits.max_hotels_per_date) {
+             sanitizedHotels = sanitizedHotels.slice(0, clientLimits.max_hotels_per_date);
+        }
 
         const isAgain = rawText.toUpperCase().includes('AGAIN') || rawText.toUpperCase().includes('SAME');
         if ((sanitizedHotels.length === 0 || (sanitizedHotels.length === 1 && /AGAIN|SAME/i.test(sanitizedHotels[0]))) && isAgain) {
@@ -1348,7 +1477,7 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
         // 3. Process the Loop
         for (const hotelName of sanitizedHotels) {
-          if (limitReached) break blockLoop;
+ 
 
           const hotel = normalizeHotelForAI(hotelName);
           if (!hotel) continue;
@@ -1359,10 +1488,13 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           // Now we search the text using the raw name, not the clean one!
           const fullLine = effectiveText.split('\n').find(l => l.toLowerCase().includes(rawNameInText.toLowerCase())) || rawNameInText;
           
-          let activeTypes = extractRoomTypesFromText(fullLine);
+         let activeTypes = extractRoomTypesFromText(fullLine);
           if (activeTypes.length === 0) activeTypes = universalTypes;
           
-          if (activeTypes.length > LIMITS.MAX_ROOM_TYPES) activeTypes = activeTypes.slice(0, LIMITS.MAX_ROOM_TYPES);
+          // 🛑 SMART LIMIT: Trim Room Types
+          if (activeTypes.length > clientLimits.max_room_types) {
+              activeTypes = activeTypes.slice(0, clientLimits.max_room_types);
+          }
 
           const mealHint = extractMeal(effectiveText);
           const viewHint = extractView(effectiveText);
@@ -1392,10 +1524,11 @@ const aiInput = protectDoubleTreeHotel([
           try { 
               ai = await parseClientMessageWithAI(aiInput); 
           } catch (err) { continue; }
-          if (!ai?.queries) continue;
+            if (!ai?.queries) continue;
 
           for (const qRaw of ai.queries) {
-              if (requestCount >= LIMITS.MAX_TOTAL_REQUESTS) {
+              // 🛑 SMART LIMIT: Max Child Queries Enforcer
+              if (requestCount >= clientLimits.max_child_queries) {
                   limitReached = true;
                   break blockLoop;
               }
@@ -1548,13 +1681,6 @@ const aiInput = protectDoubleTreeHotel([
        } 
       }
       
-      if (limitReached) {
-          for (const owner of getOwnerGroups()) {
-              await sock.sendMessage(owner, { 
-                  text: `⚠️ *SAFETY BREAKER TRIPPED*\n\n📍 Group: ${groupId}\n\n🛑 Request limit of ${LIMITS.MAX_TOTAL_REQUESTS} hit.\n✅ Auto-processed first ${LIMITS.MAX_TOTAL_REQUESTS} queries.\n⚠️ Remaining items ignored. Please check manually.` 
-              });
-          }
-      }
       
       // 🚨 FAILURE 3: NO VALID QUERIES GENERATED (After parsing)
       if (!allQueries.length) {
@@ -1667,11 +1793,11 @@ ${mealViewLine}
               const usedVendorsForThisDate = new Set();
               const uniqueHotels = [...new Set(queries.map(q => q.hotel))];
               
-              // Sort by Scarcity
+              // Sort hotels by number of available vendors (Least options get priority)
               const hotelOps = uniqueHotels.map(hotel => {
                   return { 
                       hotel, 
-                      vendors: getVendorsForHotel(hotel) 
+                      vendors: getVendorsForHotelDB(hotel) 
                   };
               }).sort((a, b) => a.vendors.length - b.vendors.length);
 
@@ -1683,7 +1809,7 @@ ${mealViewLine}
                   if (hotelQueries.length === 0) continue;
 
                   const availableVendors = vendors.filter(v => !usedVendorsForThisDate.has(v));
-                  const selectedVendors = availableVendors.slice(0, LIMITS.MAX_VENDORS_PER_HOTEL);
+                  const selectedVendors = availableVendors; // Send to ALL available vendors
 
                   if (selectedVendors.length > 0) {
                       // Loop through EVERY query for this hotel
@@ -1720,7 +1846,7 @@ ${mealViewLine}
                               continue;
                           }
                           
-                          const clientCode = getClientCode(groupId) || 'REQ';
+                          const clientCode = getClientCodeDB(groupId) || 'REQ';
 
                           console.log(`🔍 [DEBUG] Pre-Format: ID=${dbChildId}, Code=${clientCode}`);
 
@@ -1867,7 +1993,7 @@ try {
 
               // 3. SEND TO OWNER
               const report = formatForOwner(v2Quote, context.request_id);
-              const owners = getOwnerGroups();
+              const owners = getOwnerGroupsDB();
               for (const ownerGroupId of owners) {
                   await sock.sendMessage(ownerGroupId, { text: report });
               }
