@@ -2601,8 +2601,9 @@ app.get('/archive', async (req, res) => {
 // ==========================================
 // 🚀 SERVER START
 // ==========================================
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+
+// Adding '0.0.0.0' is the magic key for Termux to Laptop connections
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 Dashboard running at http://localhost:${PORT}`);
-    console.log(`📶 WiFi Access (Use Laptop IP): http://YOUR_IP_HERE:${PORT}\n`);
+    console.log(`🚀 Dashboard globally accessible on port ${PORT}`);
 });
