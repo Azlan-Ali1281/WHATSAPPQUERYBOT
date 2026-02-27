@@ -1,0 +1,77 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .edit-card { background: white; border-radius: 16px; border: 1px solid var(--border); padding: 32px; max-width: 600px; margin: 24px 0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); }
+    .form-group { margin-bottom: 24px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    .form-control { width: 100%; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 15px; color: var(--text-main); background: #f8fafc; transition: all 0.2s; }
+    .form-control:focus { outline: none; border-color: var(--primary); background: white; box-shadow: 0 0 0 3px var(--primary-soft); }
+    .form-control:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+
+    select.form-control { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; padding-right: 40px; }
+
+    .btn-save { background: var(--primary); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.2s; }
+    .btn-save:hover { background: #059669; }
+
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 600; transition: color 0.2s; }
+    .back-link:hover { color: var(--text-main); }
+</style>
+
+<div class="grid-container">
+    <a href="/clients" class="back-link"><i data-lucide="arrow-left" style="width: 16px;"></i> Back to Directory</a>
+    
+    <div style="margin-top: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">Configure Group</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Update roles and access limits for this WhatsApp group.</p>
+    </div>
+
+    <div class="edit-card">
+        <form action="/group/<%= info.group_id %>/update" method="POST">
+            
+            <div class="form-group">
+                <label>WhatsApp Group ID (System)</label>
+                <input type="text" class="form-control" value="<%= info.group_id %>" disabled>
+            </div>
+
+            <div class="form-group">
+                <label>Group Name</label>
+                <input type="text" name="name" class="form-control" value="<%= info.name || '' %>" placeholder="e.g. Super Travels">
+            </div>
+
+            <div class="form-group">
+                <label>Short Code (Reference)</label>
+                <input type="text" name="client_code" class="form-control" value="<%= info.client_code %>" required>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label>System Role</label>
+                    <select name="role" class="form-control">
+                        <option value="UNKNOWN" <%= info.role === 'UNKNOWN' ? 'selected' : '' %>>UNKNOWN (Disabled)</option>
+                        <option value="CLIENT" <%= info.role === 'CLIENT' ? 'selected' : '' %>>CLIENT (Sender)</option>
+                        <option value="VENDOR" <%= info.role === 'VENDOR' ? 'selected' : '' %>>VENDOR (Receiver)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Limit Tier</label>
+                    <select name="limit_tier" class="form-control">
+                        <option value="NONE" <%= info.limit_tier === 'NONE' ? 'selected' : '' %>>No Tier Assigned</option>
+                        <% tiers.forEach(t => { %>
+                            <option value="<%= t.tier_name %>" <%= info.limit_tier === t.tier_name ? 'selected' : '' %>>
+                                <%= t.tier_name %>
+                            </option>
+                        <% }); %>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-save">
+                <i data-lucide="save" style="width: 18px;"></i> Save Configuration
+            </button>
+        </form>
+    </div>
+</div>
+
+<%- include('partials/footer.ejs') %>

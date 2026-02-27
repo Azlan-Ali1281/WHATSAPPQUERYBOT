@@ -1,0 +1,84 @@
+<%- include('partials/header.ejs') %>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">System Health</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Live metrics from the WhatsApp server.</p>
+    </div>
+
+    <div class="stats-grid">
+        <div class="card">
+            <div class="icon-box" style="background: #ecfdf5; color: #10b981;"><i data-lucide="activity"></i></div>
+            <div class="val"><%= stats.todayQueries %></div>
+            <div class="label">Queries Today</div>
+        </div>
+        <div class="card">
+            <div class="icon-box" style="background: #eff6ff; color: #3b82f6;"><i data-lucide="message-square"></i></div>
+            <div class="val"><%= stats.totalParentQueries %></div>
+            <div class="label">Total Client Queries</div>
+        </div>
+        <div class="card">
+            <div class="icon-box" style="background: #fef2f2; color: #ef4444;"><i data-lucide="send"></i></div>
+            <div class="val"><%= stats.totalChildQueries %></div>
+            <div class="label">Total Vendor Pings</div>
+        </div>
+        <div class="card">
+            <div class="icon-box" style="background: #f5f3ff; color: #8b5cf6;"><i data-lucide="users"></i></div>
+            <div class="val"><%= stats.activeClients %></div>
+            <div class="label">Active Clients</div>
+        </div>
+        <div class="card">
+            <div class="icon-box" style="background: #fff7ed; color: #f59e0b;"><i data-lucide="building-2"></i></div>
+            <div class="val"><%= stats.activeVendors %></div>
+            <div class="label">Mapped Vendors</div>
+        </div>
+        <div class="card">
+            <div class="icon-box" style="background: #f0fdf4; color: #16a34a;"><i data-lucide="check-circle"></i></div>
+            <div class="val"><%= stats.totalReplies %></div>
+            <div class="label">Vendor Replies</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 24px; padding: 24px;">
+        <h3 style="margin-top: 0; margin-bottom: 20px; font-size: 16px;">Query Traffic (Last 7 Days)</h3>
+        <div style="height: 300px; width: 100%;">
+            <canvas id="trafficChart" data-graph='<%- JSON.stringify(graphData || []) %>'></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Chart Logic
+    const chartCanvas = document.getElementById('trafficChart');
+    if (chartCanvas) {
+        const rawData = JSON.parse(chartCanvas.getAttribute('data-graph') || '[]');
+        const labels = rawData.map(d => {
+            const date = new Date(d.date);
+            return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        });
+        const counts = rawData.map(d => d.count);
+
+        new Chart(chartCanvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: labels.length > 0 ? labels : ['No Data'],
+                datasets: [{
+                    label: 'Client Queries',
+                    data: counts.length > 0 ? counts : [0],
+                    borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true, tension: 0.4, borderWidth: 3, pointRadius: 4, pointBackgroundColor: '#10b981', pointBorderColor: '#fff'
+                }]
+            },
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, grid: { borderDash: [5, 5] }, ticks: { stepSize: 1 } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+</script>
+
+<%- include('partials/footer.ejs') %>

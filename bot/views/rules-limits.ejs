@@ -1,0 +1,93 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 24px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); max-width: 900px; }
+    .card-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text-main); border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
+    
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 24px; }
+    th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 2px solid #f1f5f9; white-space: nowrap; }
+    td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
+
+    .add-form-bg { background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px dashed #cbd5e1; }
+    .rule-input-sm { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; width: 100%; outline: none; }
+    .rule-input-sm:focus { border-color: var(--primary); }
+    .btn-save-sm { background: #1e293b; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }
+    .btn-save-sm:hover { background: #0f172a; }
+
+    @media (max-width: 768px) {
+        .limits-grid { grid-template-columns: 1fr 1fr !important; }
+    }
+</style>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">Usage Limits</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Control how many queries and variations clients can request.</p>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><i data-lucide="shield-check" style="color: #3b82f6;"></i> Active Limit Tiers</div>
+        
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tier Name</th>
+                        <th title="Child Queries per Message">C/M</th>
+                        <th title="Max Hotels">H</th>
+                        <th title="Max Dates">D</th>
+                        <th title="Max Rooms">R</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% limits.forEach(tier => { %>
+                    <tr>
+                        <td style="font-weight: 800;"><%= tier.tier_name %></td>
+                        <td><%= tier.max_child_queries %></td>
+                        <td><%= tier.max_hotels_per_date %></td>
+                        <td><%= tier.max_date_ranges %></td>
+                        <td><%= tier.max_room_types %></td>
+                        <td style="text-align: right;">
+                            <% if(tier.tier_name !== 'DEFAULT') { %>
+                            <form action="/rules/limits/delete/<%= tier.tier_name %>" method="POST">
+                                <button class="btn-del" style="background:none; border:none; color:#ef4444; cursor:pointer;"><i data-lucide="trash-2" style="width:16px;"></i></button>
+                            </form>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="add-form-bg">
+            <p style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;">Add or Update Limit Tier</p>
+            <form action="/rules/limits/upsert" method="POST">
+                <input type="text" name="tier_name" class="rule-input-sm" placeholder="Tier Name (e.g. PRO)" required style="margin-bottom:16px;">
+                <div class="limits-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">CHILD/MSG</label>
+                        <input type="number" name="max_child" class="rule-input-sm" value="6">
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">HOTELS</label>
+                        <input type="number" name="max_hotel" class="rule-input-sm" value="4">
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">DATES</label>
+                        <input type="number" name="max_date" class="rule-input-sm" value="3">
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">ROOM TYPES</label>
+                        <input type="number" name="max_room" class="rule-input-sm" value="2">
+                    </div>
+                </div>
+                <input type="hidden" name="max_daily" value="50">
+                <button type="submit" class="btn-save-sm" style="margin-top:20px;">Save Limit Tier</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<%- include('partials/footer.ejs') %>

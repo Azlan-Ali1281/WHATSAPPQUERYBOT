@@ -1,42 +1,37 @@
-// src/v2/markupEngine.js
-
-// 🛡️ DEFAULT FALLBACK TIERS (Before you send a WhatsApp command)
-let activeTiers = [
-    { threshold: 500, margin: 20 },
-    { threshold: 1000, margin: 40 },
-    { threshold: Infinity, margin: 60 }
-];
+const { getDatabase } = require('../database');
+const db = getDatabase();
 
 /**
- * 🧮 Calculates the profit markup based on the net room rate
+ * 🧮 DYNAMIC MARKUP CALCULATION
+ * This is the ONLY function that should calculate profit.
  */
-function getMarkup(clientCode, netDailyTotal) {
-    // Note: If you have special logic for 'clientCode' (like VIPs), you can keep it here!
-    
-    // Find the first tier where the net cost is less than or equal to the threshold
-    for (const tier of activeTiers) {
-        if (netDailyTotal <= tier.threshold) {
-            return tier.margin;
+function getMarkup(markupTier, netDailyTotal) {
+    try {
+const tierSearch = (markupTier || 'DEFAULT').trim().toUpperCase();
+const rule = db.prepare(`SELECT markup_amount FROM markup_rules WHERE UPPER(client_code) = ? AND ? >= min_price AND ? < max_price LIMIT 1`).get(tierSearch, netDailyTotal, netDailyTotal);
+
+        if (rule) {
+            console.log(`📈 [MARKUP] Found Rule for ${tierSearch}: +${rule.markup_amount} SAR`);
+            return rule.markup_amount;
         }
+
+        // Fallback logic
+        const fallback = db.prepare(`
+            SELECT markup_amount FROM markup_rules 
+            WHERE client_code = 'DEFAULT' 
+            AND ? >= min_price AND ? < max_price 
+            LIMIT 1
+        `).get(netDailyTotal, netDailyTotal);
+
+        return fallback ? fallback.markup_amount : 20;
+    } catch (e) {
+        console.error("🚨 Markup Engine Error:", e.message);
+        return 20; 
     }
-    
-    // Safety fallback
-    return activeTiers[activeTiers.length - 1].margin;
 }
 
-/**
- * 🔄 Updates the active tiers dynamically from WhatsApp
- */
-function updateTiers(newTiers) {
-    // Sort them from lowest threshold to highest to ensure the math always works
-    activeTiers = newTiers.sort((a, b) => a.threshold - b.threshold);
-}
-
-/**
- * 📊 Returns the current rules for the WhatsApp confirmation message
- */
-function getCurrentTiers() {
-    return activeTiers;
-}
+// Support functions for WhatsApp commands (kept so bot doesn't crash)
+function updateTiers(newTiers) { return; } 
+function getCurrentTiers() { return []; }
 
 module.exports = { getMarkup, updateTiers, getCurrentTiers };

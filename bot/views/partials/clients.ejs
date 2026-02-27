@@ -1,0 +1,45 @@
+<%- include('partials/header') %>
+
+<div class="grid-container">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px;">
+        <div>
+            <h1 style="margin: 0; font-size: 24px;">Group Management</h1>
+            <p style="color: var(--text-muted); margin: 4px 0 0 0;">Manage roles, tiers, and short-codes for all groups.</p>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <table>
+            <thead>
+                <tr>
+                    <th>Group Name</th>
+                    <th>Short Code</th>
+                    <th>Role</th>
+                    <th>Current Tier</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% groups.forEach(group => { %>
+                <tr>
+                    <td style="font-weight: 600;"><%= group.name %></td>
+                    <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">#<%= group.client_code %></code></td>
+                    <td>
+                        <span class="badge <%= group.role === 'CLIENT' ? 'badge-client' : 'badge-vendor' %>">
+                            <%= group.role %>
+                        </span>
+                    </td>
+                    <td><%= group.limit_tier || 'N/A' %></td>
+                    <td style="text-align: right;">
+                        <a href="/group/<%= group.group_id %>" class="btn-edit">
+                            <i data-lucide="edit-3" style="width: 16px; vertical-align: middle;"></i> Manage
+                        </a>
+                    </td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<%- include('partials/footer') %>

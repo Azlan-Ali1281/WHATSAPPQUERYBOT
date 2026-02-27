@@ -1,0 +1,227 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .section-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; margin-top: 32px; }
+    
+    .table-card { background: white; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); overflow: hidden; margin-bottom: 24px; }
+    .table-responsive { width: 100%; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    
+    th { background: #f8fafc; padding: 12px 16px; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: #fcfcfc; }
+    
+    /* Inline Form Controls (PC Default) */
+    .inline-input { width: 100%; padding: 8px 12px; border: 1px solid transparent; border-radius: 6px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13px; font-weight: 600; color: var(--text-main); background: transparent; transition: all 0.2s; }
+    .inline-input:hover { border-color: var(--border); background: white; }
+    .inline-input:focus { outline: none; border-color: var(--primary); background: white; box-shadow: 0 0 0 3px var(--primary-soft); }
+    
+    .inline-select { cursor: pointer; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 600; color: var(--text-main); background: #f8fafc; transition: all 0.2s; }
+    .inline-select:focus { outline: none; border-color: var(--primary); }
+
+    .btn-save { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-save:hover { background: #059669; }
+
+    /* Specific Headers */
+    .head-warning { color: #d97706; }
+    .head-client { color: #15803d; }
+    .head-vendor { color: #6d28d9; }
+
+    /* ==========================================
+       📱 MOBILE RESPONSIVE TABLE (CARD VIEW)
+       ========================================== */
+    @media (max-width: 768px) {
+        /* Force table elements to block level */
+        .table-card table, .table-card thead, .table-card tbody, .table-card th, .table-card td, .table-card tr { display: block; }
+        
+        /* Hide traditional table headers entirely */
+        .table-card thead tr { position: absolute; top: -9999px; left: -9999px; }
+        
+        /* Remove outer border so cards float nicely */
+        .table-card { border: none; box-shadow: none; background: transparent; }
+        
+        /* Style rows to look like individual floating cards */
+        .table-card tr {
+            border: 1px solid var(--border) !important;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            padding: 16px;
+            box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.05);
+        }
+        
+        /* Stack the input elements vertically */
+        .table-card td {
+            border: none; padding: 8px 0; display: flex; flex-direction: column; gap: 6px;
+        }
+        
+        /* Dynamically pull the column name from the data-label attribute */
+        .table-card td::before {
+            content: attr(data-label);
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            color: var(--text-muted); letter-spacing: 0.5px;
+        }
+
+        /* On mobile, make inputs look like actual form boxes since there's no hover */
+        .inline-input { border: 1px solid var(--border); background: #f8fafc; padding: 12px; font-size: 14px; }
+        .inline-select { padding: 12px; font-size: 14px; }
+
+        /* Separate the save button with a dashed line */
+        .table-card td:last-child {
+            margin-top: 12px; padding-top: 16px; border-top: 1px dashed var(--border);
+        }
+        .btn-save { width: 100%; padding: 14px; font-size: 14px; }
+    }
+</style>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">Group Command Center</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Assign roles, update shortcodes, and set limits instantly.</p>
+    </div>
+
+    <% 
+        const unknowns = groups.filter(g => g.role === 'UNKNOWN');
+        const clients = groups.filter(g => g.role === 'CLIENT');
+        const vendors = groups.filter(g => g.role === 'VENDOR');
+    %>
+
+    <% if (unknowns.length > 0) { %>
+        <div class="section-title head-warning"><i data-lucide="alert-circle" style="width: 20px;"></i> Pending Assignment (<%= unknowns.length %>)</div>
+        <div class="table-card" style="border: 1px solid #fde68a;">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 20%;">Group Name</th>
+                            <th style="width: 15%;">Short Code</th>
+                            <th style="width: 20%;">Assign Role</th>
+                            <th style="width: 15%;">Limit Tier</th>
+                            <th style="width: 15%;">Markup Tier</th>
+                            <th style="text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% unknowns.forEach(group => { %>
+                            <form id="form-<%= group.group_id %>" action="/group/<%= group.group_id %>/quick-update" method="POST"></form>
+                            <tr style="background: #fffbeb;">
+                                <td data-label="Group Name"><input form="form-<%= group.group_id %>" type="text" name="name" class="inline-input" value="<%= group.name %>"></td>
+                                <td data-label="Short Code"><input form="form-<%= group.group_id %>" type="text" name="client_code" class="inline-input" value="<%= group.client_code %>"></td>
+                                <td data-label="Role">
+                                    <select form="form-<%= group.group_id %>" name="role" class="inline-select" style="border-color: #fcd34d;">
+                                        <option value="UNKNOWN" selected>UNKNOWN</option>
+                                        <option value="CLIENT">Set as CLIENT</option>
+                                        <option value="VENDOR">Set as VENDOR</option>
+                                    </select>
+                                </td>
+                                <td data-label="Limit Tier">
+                                    <select form="form-<%= group.group_id %>" name="limit_tier" class="inline-select">
+                                        <option value="NONE">No Limit</option>
+                                        <% tiers.forEach(t => { %><option value="<%= t.tier_name %>"><%= t.tier_name %></option><% }); %>
+                                    </select>
+                                </td>
+                                <td data-label="Markup Tier">
+                                    <select form="form-<%= group.group_id %>" name="markup_tier" class="inline-select">
+                                        <% markupTiers.forEach(m => { %><option value="<%= m.tier_name %>"><%= m.tier_name %></option><% }); %>
+                                    </select>
+                                </td>
+                                <td data-label="Action" style="text-align: right;"><button form="form-<%= group.group_id %>" type="submit" class="btn-save">Assign Group</button></td>
+                            </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <% } %>
+
+    <div class="section-title head-client"><i data-lucide="users" style="width: 20px;"></i> Active Clients (<%= clients.length %>)</div>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 20%;">Group Name</th>
+                        <th style="width: 15%;">Client Code</th>
+                        <th style="width: 20%;">Role</th>
+                        <th style="width: 15%;">Limit Tier</th>
+                        <th style="width: 15%;">Markup Tier</th>
+                        <th style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if(clients.length === 0) { %><tr><td colspan="6" style="text-align:center; color:#94a3b8; padding: 32px;">No clients assigned yet.</td></tr><% } %>
+                    <% clients.forEach(group => { %>
+                        <form id="form-<%= group.group_id %>" action="/group/<%= group.group_id %>/quick-update" method="POST"></form>
+                        <tr style="background: white;">
+                            <td data-label="Group Name"><input form="form-<%= group.group_id %>" type="text" name="name" class="inline-input" value="<%= group.name %>"></td>
+                            <td data-label="Client Code"><input form="form-<%= group.group_id %>" type="text" name="client_code" class="inline-input" value="<%= group.client_code %>"></td>
+                            <td data-label="Role">
+                                <select form="form-<%= group.group_id %>" name="role" class="inline-select">
+                                    <option value="CLIENT" selected>CLIENT</option>
+                                    <option value="VENDOR">Switch to VENDOR</option>
+                                    <option value="UNKNOWN">Revoke (UNKNOWN)</option>
+                                </select>
+                            </td>
+                            <td data-label="Limit Tier">
+                                <select form="form-<%= group.group_id %>" name="limit_tier" class="inline-select">
+                                    <option value="NONE" <%= group.limit_tier === 'NONE' ? 'selected' : '' %>>No Limit</option>
+                                    <% tiers.forEach(t => { %>
+                                        <option value="<%= t.tier_name %>" <%= group.limit_tier === t.tier_name ? 'selected' : '' %>><%= t.tier_name %></option>
+                                    <% }); %>
+                                </select>
+                            </td>
+                            <td data-label="Markup Tier">
+                                <select form="form-<%= group.group_id %>" name="markup_tier" class="inline-select">
+                                    <% markupTiers.forEach(m => { %>
+                                        <option value="<%= m.tier_name %>" <%= group.markup_tier === m.tier_name ? 'selected' : '' %>><%= m.tier_name %></option>
+                                    <% }); %>
+                                </select>
+                            </td>
+                            <td data-label="Action" style="text-align: right;"><button form="form-<%= group.group_id %>" type="submit" class="btn-save" style="background: #1e293b;">Save Changes</button></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section-title head-vendor"><i data-lucide="building-2" style="width: 20px;"></i> Active Vendors (<%= vendors.length %>)</div>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 30%;">Vendor Name</th>
+                        <th style="width: 25%;">Vendor Code</th>
+                        <th style="width: 25%;">Role</th>
+                        <th style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if(vendors.length === 0) { %><tr><td colspan="4" style="text-align:center; color:#94a3b8; padding: 32px;">No vendors assigned yet.</td></tr><% } %>
+                    <% vendors.forEach(group => { %>
+                        <form id="form-<%= group.group_id %>" action="/group/<%= group.group_id %>/quick-update" method="POST"></form>
+                        <input form="form-<%= group.group_id %>" type="hidden" name="limit_tier" value="NONE">
+                        <input form="form-<%= group.group_id %>" type="hidden" name="markup_tier" value="DEFAULT">
+                        
+                        <tr style="background: white;">
+                            <td data-label="Vendor Name"><input form="form-<%= group.group_id %>" type="text" name="name" class="inline-input" value="<%= group.name %>"></td>
+                            <td data-label="Vendor Code"><input form="form-<%= group.group_id %>" type="text" name="client_code" class="inline-input" value="<%= group.client_code %>"></td>
+                            <td data-label="Role">
+                                <select form="form-<%= group.group_id %>" name="role" class="inline-select">
+                                    <option value="VENDOR" selected>VENDOR</option>
+                                    <option value="CLIENT">Switch to CLIENT</option>
+                                    <option value="UNKNOWN">Revoke (UNKNOWN)</option>
+                                </select>
+                            </td>
+                            <td data-label="Action" style="text-align: right;"><button form="form-<%= group.group_id %>" type="submit" class="btn-save" style="background: #1e293b;">Save Changes</button></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<%- include('partials/footer.ejs') %>

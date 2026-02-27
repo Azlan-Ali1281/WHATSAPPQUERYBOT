@@ -1,0 +1,169 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .rules-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: start; }
+    .card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 20px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); }
+    .card-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text-main); border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
+    
+    /* Tier Boxes */
+    .tier-box { margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+    .tier-header { background: #f8fafc; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }
+    .tier-name { font-weight: 800; font-size: 13px; color: #1e293b; text-transform: uppercase; }
+    
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; border-bottom: 2px solid #f1f5f9; }
+    td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+
+    .btn-delete-group { color: #ef4444; font-size: 10px; font-weight: 700; cursor: pointer; background: #fee2e2; border: 1px solid #fecaca; padding: 3px 8px; border-radius: 4px; }
+    .btn-delete-group:hover { background: #ef4444; color: white; }
+
+    .add-form-bg { background: #f8fafc; padding: 15px; border-radius: 10px; border: 1px dashed #cbd5e1; margin-top: 10px; }
+    .rule-input-sm { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; width: 100%; outline: none; }
+    .rule-input-sm:focus { border-color: var(--primary); }
+
+    @media (max-width: 1200px) { .rules-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 24px;">Rule Engine</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Manage pricing markups and bot usage restrictions in one place.</p>
+    </div>
+
+    <div class="rules-grid">
+        
+        <div class="card">
+            <div class="card-title"><i data-lucide="banknote" style="color: #10b981;"></i> Profit Markups</div>
+
+            <% 
+                const grouped = {};
+                markups.forEach(m => {
+                    if (!grouped[m.client_code]) grouped[m.client_code] = [];
+                    grouped[m.client_code].push(m);
+                });
+            %>
+
+            <% Object.keys(grouped).forEach(tierName => { %>
+                <div class="tier-box">
+                    <div class="tier-header">
+                        <span class="tier-name"><i data-lucide="tag" style="width:12px; display:inline; margin-right:4px;"></i> <%= tierName %></span>
+                        <% if(tierName !== 'DEFAULT') { %>
+                            <form action="/rules/markup/delete-group/<%= tierName %>" method="POST" onsubmit="return confirm('Delete entire rule group?')">
+                                <button type="submit" class="btn-delete-group">Delete Rule</button>
+                            </form>
+                        <% } %>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Min SAR</th>
+                                <th>Max SAR</th>
+                                <th>Profit</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% grouped[tierName].forEach(rule => { %>
+                                <tr>
+                                    <td><%= rule.min_price %></td>
+                                    <td><%= rule.max_price %></td>
+                                    <td style="color: #10b981; font-weight: 700;">+<%= rule.markup_amount %></td>
+                                    <td style="text-align: right;">
+                                        <form action="/rules/markup/delete-tier/<%= rule.id %>" method="POST">
+                                            <button class="btn-del"><i data-lucide="trash-2" style="width:14px;"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                    <div style="padding: 10px; background: #fcfcfc; border-top: 1px solid #f1f5f9;">
+                        <form action="/rules/markup/add" method="POST" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px;">
+                            <input type="hidden" name="client_code" value="<%= tierName %>">
+                            <input type="number" name="min_price" class="rule-input-sm" placeholder="Min" required>
+                            <input type="number" name="max_price" class="rule-input-sm" placeholder="Max" required>
+                            <input type="number" name="markup_amount" class="rule-input-sm" placeholder="Profit" required>
+                            <button type="submit" class="btn-save-sm" style="margin:0; width: auto; padding: 0 10px;"><i data-lucide="plus" style="width:14px;"></i></button>
+                        </form>
+                    </div>
+                </div>
+            <% }); %>
+
+            <div class="add-form-bg">
+                <p style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 10px;">Create Completely New Rule Name</p>
+                <form action="/rules/markup/add" method="POST" style="display: flex; gap: 10px;">
+                    <input type="text" name="client_code" class="rule-input-sm" placeholder="New Rule (e.g. VIP-B2B)" required>
+                    <input type="hidden" name="min_price" value="0">
+                    <input type="hidden" name="max_price" value="99999">
+                    <input type="hidden" name="markup_amount" value="20">
+                    <button type="submit" class="btn-save-sm" style="margin:0; width: auto; white-space:nowrap; padding: 0 15px;">+ Create</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><i data-lucide="shield-check" style="color: #3b82f6;"></i> Usage Restrictions</div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tier Name</th>
+                        <th title="Child Queries per Message">C/M</th>
+                        <th title="Max Hotels">H</th>
+                        <th title="Max Dates">D</th>
+                        <th title="Max Rooms">R</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% limits.forEach(tier => { %>
+                    <tr>
+                        <td style="font-weight: 800;"><%= tier.tier_name %></td>
+                        <td><%= tier.max_child_queries %></td>
+                        <td><%= tier.max_hotels_per_date %></td>
+                        <td><%= tier.max_date_ranges %></td>
+                        <td><%= tier.max_room_types %></td>
+                        <td style="text-align: right;">
+                            <% if(tier.tier_name !== 'DEFAULT') { %>
+                            <form action="/rules/limits/delete/<%= tier.tier_name %>" method="POST">
+                                <button class="btn-del"><i data-lucide="trash-2" style="width:14px;"></i></button>
+                            </form>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+            
+            <div class="add-form-bg">
+                <p style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 10px;">Add or Update Limit Tier</p>
+                <form action="/rules/limits/upsert" method="POST">
+                    <input type="text" name="tier_name" class="rule-input-sm" placeholder="Tier Name (e.g. PRO)" required style="margin-bottom:12px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div>
+                            <label style="font-size: 10px; color: #64748b; font-weight: 700;">CHILD/MSG</label>
+                            <input type="number" name="max_child" class="rule-input-sm" value="6">
+                        </div>
+                        <div>
+                            <label style="font-size: 10px; color: #64748b; font-weight: 700;">HOTELS</label>
+                            <input type="number" name="max_hotel" class="rule-input-sm" value="4">
+                        </div>
+                        <div>
+                            <label style="font-size: 10px; color: #64748b; font-weight: 700;">DATES</label>
+                            <input type="number" name="max_date" class="rule-input-sm" value="3">
+                        </div>
+                        <div>
+                            <label style="font-size: 10px; color: #64748b; font-weight: 700;">ROOM TYPES</label>
+                            <input type="number" name="max_room" class="rule-input-sm" value="2">
+                        </div>
+                    </div>
+                    <input type="hidden" name="max_daily" value="50">
+                    <button type="submit" class="btn-save-sm" style="background: #1e293b; margin-top:15px;">Save Limit Tier</button>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<%- include('partials/footer.ejs') %>

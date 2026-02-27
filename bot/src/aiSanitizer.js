@@ -63,6 +63,7 @@ async function sanitizeHotelNames(rawHotels) {
       - "Makkah Hotel" and "Makkah Towers" are DIFFERENT. Respect the user's choice.
       - "Emaar Grand" vs "Emaar Elite" vs "Emaar Royal". Don't mix them.
       - "Saja Makkah" vs "Saja Madinah". Don't mix them.
+      = "Dar Al Taqwa" vs "Maysan Altaqwa" - Don't mix them.
 
     ### 3. 🛡️ SANITIZATION RULES
     - **Unknown Hotels:** If the hotel is VALID but NOT in the Official Registry (e.g. "Four Points"), just fix the spelling. DO NOT force it into the registry.
@@ -94,4 +95,4 @@ async function sanitizeHotelNames(rawHotels) {
   }
 }
 
-module.exports = { sanitizeHotelNames };
+module.exports = { sanitizeHotelNames, OFFICIAL_REGISTRY };

@@ -1,8 +1,7 @@
-// src/v2/calculator.js
 const { parseVendorMessageWithAI } = require('./aiVendorParser');
 const { sanitizeHotelNames } = require('../aiSanitizer'); 
 const { getMarkup } = require('./markupEngine');
-const { getClientCode } = require('../database');
+const { getGroupInfo } = require('../database'); // 🛡️ CRITICAL: Fetch full info for tier support
 
 // 🛡️ NOTE: Thursday (4) and Friday (5) are the standard Saudi hospitality weekend days.
 const WEEKEND_DAYS = [4, 5]; 
@@ -12,14 +11,10 @@ const WEEKEND_DAYS = [4, 5];
  * Calculates the cost for ONE room and applies tiered profit markups.
  */
 async function calculateQuote(childQuery, vendorText, preParsedData = null) {
-    // 🔍 Debug: Verify what data reached the calculator
-
     const isLocalDB = !!preParsedData;
     
     // 🔍 Debug: Verify what data reached the calculator
     console.log(`🧪 CALC DEBUG: Client requested [${childQuery.meal || 'N/A'}] | isLocalDB: ${isLocalDB}`);
-
-    console.log(`🧪 CALC DEBUG: Client requested [${childQuery.meal || 'N/A'}] | Vendor base is [${vendorText ? vendorText.toLowerCase().includes('ro') ? 'RO' : '??' : 'DB_JSON'}]`);
 
     // 🛡️ THE FIX: Use Local DB JSON if provided. ONLY call AI if it's a new vendor reply.
     let vendorData;
@@ -63,27 +58,26 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         }
     }
 
-    // 🛡️ (Gate 1.5 has been intentionally removed so we DO NOT overwrite the client's requested room type!)
-
 // ======================================================
-    // 🛡️ GATE 2: DATE INTEGRITY GUARD (With Anti-Hallucination)
+    // 🛡️ GATE 2: DATE INTEGRITY GUARD (STRICT MONTH LOCK)
     // ======================================================
     let vendorStartDate = null;
     let vendorEndDate = null;
     const allRates = vendorData.split_rates || vendorData.rates || [];
 
-// 🛡️ ANTI-HALLUCINATION: Did the vendor actually type dates?
-    // We check for months, slash dates, AND shorthand boundaries like "from 27", "to 5", "until 12"
+    // 1. Check if vendor text has date keywords
     const vendorMentionedDates = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}[\/\-]\d{1,2}|\b(from|to|till|until|starting)\s*\d{1,2}\b)/i.test(vendorText);
 
-    // If live vendor didn't type dates, OVERRIDE the AI's hallucination to cover the whole stay
+    // 🛡️ THE FIX: Only "Assume" dates for LIVE vendor replies. 
+    // For Local DB, if dates are missing or wrong, we reject it.
     if (!vendorMentionedDates && !isLocalDB) {
-        console.log(`⚠️ CALC: Vendor provided no dates. Overriding AI hallucination to cover full stay.`);
+        console.log(`⚠️ CALC: Live Vendor provided no dates. Using query range.`);
         allRates.forEach(r => {
             if (r.dates) r.dates = `${childQuery.check_in} to ${childQuery.check_out}`;
         });
     }
 
+    // 2. Extract dates from the rate objects
     allRates.forEach(r => {
         if (r.dates && r.dates.includes(' to ')) {
             const [s, e] = r.dates.split(' to ');
@@ -92,13 +86,25 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         }
     });
 
-    // 🛡️ THE FIX: ALWAYS enforce the date boundary check.
+    // 🛡️ THE "MONTH KILLER": Absolute rejection if the year-month doesn't match
     if (vendorStartDate && vendorEndDate) {
-        const qStart = childQuery.check_in;
-        const qEnd = childQuery.check_out;
-        
-        if (vendorStartDate > qStart || vendorEndDate < qEnd) {
-            console.log(`🚫 V2 REJECTED: Date Mismatch. Query: ${qStart}/${qEnd} vs Vendor: ${vendorStartDate}/${vendorEndDate}`);
+        const queryMonth = childQuery.check_in.substring(0, 7); // "2026-11"
+        const vendorMonth = vendorStartDate.substring(0, 7);   // "2026-03" (from DB)
+
+        if (queryMonth !== vendorMonth && !vendorData.is_stitched) {
+            console.log(`🚫 V2 REJECTED: Month Mismatch. Requested: ${queryMonth} vs DB: ${vendorMonth}`);
+            return null; // Kill the quote
+        }
+    } else if (isLocalDB) {
+        // If it's a DB quote and we couldn't find dates at all, kill it.
+        console.log(`🚫 V2 REJECTED: Local DB quote has no date anchors.`);
+        return null;
+    }
+
+    // 3. Final Range Validation
+    if (vendorStartDate && vendorEndDate && !vendorData.is_stitched) {
+        if (vendorStartDate > childQuery.check_in || vendorEndDate < childQuery.check_out) {
+            console.log(`🚫 V2 REJECTED: Range too short.`);
             return null;
         }
     }
@@ -106,16 +112,11 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
     // ======================================================
     // 🛡️ GATE 2.5: ZERO-RATE & FLAT-RATE PROTECTIONS
     // ======================================================
-    
-    // 1. THE ZERO-RATE BLOCKER
-    // Base rate can NEVER be 0. If the AI hallucinates a 0, kill the quote immediately.
     if (allRates.some(r => r.rate <= 0)) {
         console.log(`🚫 V2 REJECTED: AI extracted a base rate of 0. Invalid quote.`);
         return null;
     }
 
-// 2. LAST ASHRA / MARCH FLAT-RATE OVERRIDE (Now with Extra Bed support)
-    // If dates touch March (Last Ashra) and the rate is > 4000, it's a flat package rate.
     const involvesMarch = childQuery.check_in.includes('-03-') || childQuery.check_out.includes('-03-');
     
     if (involvesMarch) {
@@ -130,29 +131,26 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
                 console.log(`⚠️ OVERRIDE: March/Ashra Flat Rate detected (${r.rate} SAR). Dividing by ${totalNights} nights.`);
                 r.rate = Math.round(r.rate / totalNights);
                 
-                // 🛡️ THE FIX: Divide the split-rate extra bed price if it exists
                 if (r.extra_bed_rate > 0) {
                     r.extra_bed_rate = Math.round(r.extra_bed_rate / totalNights);
                 }
-                
                 packageOverrideTriggered = true;
             }
         });
 
-        // 🛡️ THE FIX: Also divide the global extra bed price so the math loop doesn't charge it nightly!
         if (packageOverrideTriggered && vendorData.extra_bed_price > 0) {
             console.log(`⚠️ OVERRIDE: Dividing global Extra Bed price (${vendorData.extra_bed_price} SAR) by ${totalNights} nights.`);
             vendorData.extra_bed_price = Math.round(vendorData.extra_bed_price / totalNights);
         }
     }
-        // ======================================================
+
+    // ======================================================
     // 🧮 CALCULATION LOGIC (PER ROOM)
     // ======================================================
     if (allRates.length === 0) return null;
 
     const totalRooms = childQuery.rooms || 1;
 
-    // 🛡️ 1. CLIENT'S ORIGINAL INTENT (How many people need to sleep?)
     const originalRt = (childQuery.room_type || 'DOUBLE').toUpperCase();
     let requestedPaxPerRoom = 2; 
     if (originalRt.includes('SINGLE')) requestedPaxPerRoom = 1;
@@ -165,8 +163,6 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         requestedPaxPerRoom = Math.ceil((childQuery.persons || 2) / totalRooms);
     }
 
-    // 🛡️ 2. VENDOR BASE CAPACITY LOCK
-// 🛡️ 2. VENDOR BASE CAPACITY LOCK
     let vendorBaseCap = vendorData.quoted_base_capacity || 2;
     const lowerVendorText = vendorText.toLowerCase();
     
@@ -176,23 +172,17 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
     else if (/\b(quad|quard)\b/.test(lowerVendorText)) vendorBaseCap = 4;
     else if (/\b(quint)\b/.test(lowerVendorText)) vendorBaseCap = 5;
 
-    // 🛡️ 3. EXTRA BEDS MATH
     let extraBedsPerRoom = 0;
     if (!vendorData.is_flat_rate && requestedPaxPerRoom > vendorBaseCap) {
         extraBedsPerRoom = requestedPaxPerRoom - vendorBaseCap;
     }
 
     console.log(`🛏️ CALC EB CHECK: requestedPax(${requestedPaxPerRoom}) - baseCap(${vendorBaseCap}) = extraBeds(${extraBedsPerRoom})`);
-    const extraBedCostTotal = (vendorData.extra_bed_price || 0) * extraBedsPerRoom;
 
-    // 2. SMART MEAL LOGIC (Clean & Fixed)
-// 4. SMART MEAL LOGIC (FIXED: AI Base Meal Override)
     const rawMeal = childQuery.meal || childQuery.meal_plan || "";
     const clientRequestedMeal = rawMeal.toString().toUpperCase();
     const isClientAskingForMeal = /BB|HB|FB|BREAKFAST|IFTAR|SUHOOR/i.test(clientRequestedMeal);
     
-    // 🛡️ THE FIX: If the vendor's raw text says "RO", we MUST override the AI. 
-    // Sometimes the AI sees "BB 40" and mistakenly assumes the *base* plan is BB.
     let vendorBaseMeal = (vendorData.base_meal_plan || vendorData.meal_plan || 'RO').toUpperCase();
     if (/\b(ro|room only)\b/i.test(vendorText)) {
         vendorBaseMeal = 'RO';
@@ -203,15 +193,12 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
     let appliedMeal = ""; 
     let mealCostPerRoom = 0;
 
-    // 🛡️ NEW LOGIC: If the base plan is NOT Room Only, AND they didn't charge extra for a meal, it's included!
     if (vendorBaseMeal !== 'RO' && !vendorChargesForMeal) {
         appliedMeal = vendorBaseMeal;
         mealCostPerRoom = 0; 
     } else {
-        // If the base is RO, OR there's an explicit meal charge we need to apply
         if (isClientAskingForMeal && vendorChargesForMeal) {
             appliedMeal = clientRequestedMeal !== '' ? clientRequestedMeal : 'BB';
-            // Multiply the meal price by the number of people in the room
             mealCostPerRoom = vendorData.meal_price_per_pax * requestedPaxPerRoom;
             console.log(`🍽️ MEAL ADDED: ${requestedPaxPerRoom} pax x ${vendorData.meal_price_per_pax} = ${mealCostPerRoom} SAR`);
         } else {
@@ -220,7 +207,6 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         }
     }
     
-    // --- 🏙️ View Surcharge Logic ---
     let appliedView = (childQuery.view || 'CITY VIEW').toUpperCase();
     let viewSurcharge = 0;
     
@@ -230,14 +216,40 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         else if (appliedView.includes('CITY')) viewSurcharge = vendorData.view_surcharges.city || 0;
     }
 
-// 4. The Math Loop & Markup Application
+// ======================================================
+    // 🛡️ TIER RETRIEVAL & MATH LOOP (FINAL STABLE FIX)
+    // ======================================================
+    const { getDatabase } = require('../database');
+    const db = getDatabase();
+
+    // 1. DYNAMIC ID DETECTION: Matches 'child_id' from your database.js fetcher
+    const targetId = childQuery.child_id || childQuery.id || 792; 
+    
+    // 2. TRACE BACK: Manually JOIN tables to find the original client's JID
+    let trace = db.prepare(`
+        SELECT pq.remote_jid, cq.parent_id 
+        FROM child_queries cq 
+        JOIN parent_queries pq ON cq.parent_id = pq.id 
+        WHERE cq.id = ?
+    `).get(targetId);
+
+    // 3. IDENTIFY CLIENT: Determine the correct JID for the groups table lookup
+    const originalGroupJid = trace ? trace.remote_jid : (childQuery.client_group_id || updatedQuery.remote_jid);
+    const parentId = trace ? trace.parent_id : childQuery.parent_id;
+
+    // 4. FETCH PROFILE: Match JID to your 'groups' table using 'group_id'
+    const groupInfo = db.prepare(`SELECT markup_tier, client_code FROM groups WHERE group_id = ?`).get(originalGroupJid);
+    
+    // 5. NORMALIZE: Force Uppercase to match the 'HIGH' rule card in your rule table
+    const activeMarkupTier = groupInfo && groupInfo.markup_tier ? groupInfo.markup_tier.trim().toUpperCase() : 'DEFAULT';
+    const clientRefCode = groupInfo ? groupInfo.client_code : 'REQ';
+
+    console.log(`🔍 [TRACE] ChildID: ${targetId} | ParentID: ${parentId} | Client: ${originalGroupJid} | Tier: ${activeMarkupTier}`);
     let totalCostOneRoom = 0;
-    let totalExtraBedCostAllNights = 0; // 🛡️ NEW: Track extra bed costs across all nights
+    let totalExtraBedCostAllNights = 0; 
     const breakdown = [];
     let currentDate = new Date(updatedQuery.check_in);
     const endDate = new Date(updatedQuery.check_out);
-
-    const clientCode = getClientCode(updatedQuery.remote_jid) || 'DEFAULT';
 
     while (currentDate < endDate) {
         const dateStr = currentDate.toISOString().split('T')[0];
@@ -249,13 +261,10 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
             if (!r.dates) return false;
             const parts = r.dates.split(' to ');
             if (parts.length !== 2) return false;
-            
-            // 🛡️ THE FIX: If the AI output an exact single date (e.g. 27 to 27), we MUST use <=
-            // If it output a normal range (25 to 27), we use < so it doesn't overlap the next block!
+            // Exact date match logic
             const inRange = (parts[0] === parts[1]) 
                 ? (dateStr >= parts[0] && dateStr <= parts[1])
                 : (dateStr >= parts[0] && dateStr < parts[1]);
-                
             return inRange && r.type === targetType;
         });
 
@@ -264,11 +273,9 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
                 if (!r.dates) return false;
                 const parts = r.dates.split(' to ');
                 if (parts.length !== 2) return false;
-                
                 const inRange = (parts[0] === parts[1]) 
                     ? (dateStr >= parts[0] && dateStr <= parts[1])
                     : (dateStr >= parts[0] && dateStr < parts[1]);
-                    
                 return inRange;
             });
         }
@@ -279,29 +286,24 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
             if (!matchedRateObj) matchedRateObj = allRates[0];
         }
         
-        const baseRate = matchedRateObj ? (matchedRateObj.rate || matchedRateObj.amount || 0) : 0;
-
-        // 🛡️ THE FIX: Dynamic Extra Bed Math
+        const baseRate = matchedRateObj ? (matchedRateObj.rate || 0) : 0;
         const nightlyExtraBedPrice = matchedRateObj.extra_bed_rate || vendorData.extra_bed_price || 0;
 
-// 🚨 STRICT BLOCKER: NO FREE BEDS (ONLY FOR LOCAL DB REUSE!)
-        // If we are reusing a past quote for a larger group, we MUST have an explicit extra bed price.
-        // For live vendor replies, we assume their flat price covers the requested room type.
         if (isLocalDB && extraBedsPerRoom > 0 && nightlyExtraBedPrice === 0) {
             console.log(`🚫 V2 REJECTED: Local DB quote needs ${extraBedsPerRoom} extra bed(s), but has NO extra bed price.`);
             return null; 
         }
         
         const currentExtraBedTotal = nightlyExtraBedPrice * extraBedsPerRoom;
-        totalExtraBedCostAllNights += currentExtraBedTotal; // Add to our grand total
+        totalExtraBedCostAllNights += currentExtraBedTotal; 
 
         const nightlyRoomRate = baseRate + viewSurcharge + currentExtraBedTotal;
         const netDailyTotal = nightlyRoomRate + mealCostPerRoom;
 
         console.log(`🧮 MATH DEBUG for ${dateStr}: Base(${baseRate}) + EB(${currentExtraBedTotal}) + View(${viewSurcharge}) + Meal(${mealCostPerRoom}) = ${netDailyTotal} SAR`);
         
-        // 🛡️ APPLY MARKUP 
-        const margin = getMarkup(clientCode, netDailyTotal);
+        // 🛡️ APPLY MARKUP USING TRACED DYNAMIC TIER
+        const margin = getMarkup(activeMarkupTier, netDailyTotal);
         const finalSellingPrice = netDailyTotal + margin;
 
         totalCostOneRoom += finalSellingPrice;
@@ -309,7 +311,7 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         breakdown.push({
             date: dateStr,
             base_rate: baseRate,
-            surcharges: viewSurcharge + currentExtraBedTotal, // 🛡️ Fix: Use dynamic surcharge
+            surcharges: viewSurcharge + currentExtraBedTotal,
             meal_cost: mealCostPerRoom,
             net_daily: netDailyTotal,
             margin_added: margin,
@@ -334,7 +336,6 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
         cost_breakdown: {
             meal_daily_per_room: mealCostPerRoom,
             view_daily_per_room: viewSurcharge,
-            // 🛡️ THE FIX: Send the AVERAGE daily extra bed cost to the formatter
             eb_daily_per_room: extraBedsPerRoom > 0 ? Math.round(totalExtraBedCostAllNights / (breakdown.length || 1)) : 0,
             eb_qty: extraBedsPerRoom,
             margin_total: totalMargin 
@@ -345,7 +346,8 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
             vendor_base_capacity: vendorBaseCap,
             extra_beds_charged: extraBedsPerRoom,
             hotel_adapted: updatedQuery.hotel !== childQuery.hotel,
-            client_code: clientCode
+            client_code: clientRefCode,
+            markup_tier: activeMarkupTier 
         }
     };
 }

@@ -102,6 +102,10 @@ db.exec(`
 // Safely add new columns to existing tables
     try { db.exec(`ALTER TABLE groups ADD COLUMN limit_tier TEXT DEFAULT 'DEFAULT';`); } catch (e) {}
     try { db.exec(`ALTER TABLE groups ADD COLUMN name TEXT DEFAULT 'Unknown';`); } catch (e) {} // 👈 NEW
+    // Safely add new columns to existing tables
+    try { db.exec(`ALTER TABLE groups ADD COLUMN limit_tier TEXT DEFAULT 'DEFAULT';`); } catch (e) {}
+    try { db.exec(`ALTER TABLE groups ADD COLUMN name TEXT DEFAULT 'Unknown';`); } catch (e) {} 
+    try { db.exec(`ALTER TABLE groups ADD COLUMN markup_tier TEXT DEFAULT 'DEFAULT';`); } catch (e) {} // 👈 ADD THIS LINE
 // ======================================================
 // 🛡️ DATABASE MIGRATION (MEAL & VIEW COLUMN GUARD)
 // ======================================================
@@ -381,14 +385,15 @@ function getVendorsForHotelDB(hotelName) {
             handled = JSON.parse(vendor.handled_hotels);
         } catch (e) { continue; }
 
-        // 1. Sort into "Defaults" and "Specific Match Candidates"
+        // 1. Add to defaults if they have 'ALL', BUT DO NOT SKIP the specific checks!
         if (handled.includes('ALL')) {
             defaultVendors.add(vendor.group_id);
-            continue; // Skip keyword check for catch-all vendors
         }
 
         // 2. Keyword Matching for specific hotel mappings
         for (const targetHotel of handled) {
+            if (targetHotel === 'ALL') continue; // Skip the word 'ALL' for keyword matching
+
             const targetWords = splitMeaningfulWords(normalizeHotelName(targetHotel));
             if (targetWords.length === 0) continue;
 
@@ -402,11 +407,12 @@ function getVendorsForHotelDB(hotelName) {
 
     // 🏆 THE PRIORITY LOGIC:
     // If we found ANY specific vendor for this hotel, return ONLY them.
+    // (This will now correctly include Fallback vendors who specifically listed this hotel).
     if (specificMatches.size > 0) {
         return Array.from(specificMatches);
     }
 
-    // If NO specific vendor was found, return the 4 default vendors.
+    // If NO specific vendor was found, return the fallback vendors.
     return Array.from(defaultVendors);
 }
 
@@ -481,6 +487,38 @@ function normalizeHotelName(name) {
     .replace(/[^A-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// ======================================================
+// 🤖 AUTO-REGISTRATION LOGIC
+// ======================================================
+
+function registerUnknownGroup(groupId, groupName) {
+    // 1. Double-check it doesn't already exist
+    const existing = db.prepare("SELECT group_id FROM groups WHERE group_id = ?").get(groupId);
+    if (existing) return false;
+
+    // 2. Find the highest client_code currently in the database
+    // We cast it to INTEGER because SQLite sometimes stores it as text
+    const result = db.prepare("SELECT MAX(CAST(client_code AS INTEGER)) as max_code FROM groups").get();
+    
+    // Default to 101 if the database is totally empty, otherwise add 1
+    let nextCode = 101; 
+    if (result && result.max_code) {
+        nextCode = result.max_code + 1;
+    }
+
+    // 3. Insert the new group with the UNKNOWN role
+    const stmt = db.prepare(`
+        INSERT INTO groups (group_id, role, limit_tier, handled_hotels, client_code, name)
+        VALUES (?, 'UNKNOWN', 'NONE', '[]', ?, ?)
+    `);
+    
+    stmt.run(groupId, nextCode.toString(), groupName);
+    console.log(`\n🆕 [NEW GROUP DETECTED] Auto-Registered: "${groupName}"`);
+    console.log(`   ↳ Assigned Code: ${nextCode} | Role: UNKNOWN\n`);
+    
+    return true;
 }
 
 // 2. Updated to include common variations to ignore
@@ -596,6 +634,7 @@ module.exports = {
     recallLastChildQueries,
     getLastActiveRequest,
     upsertGroup,
+    registerUnknownGroup,
     getGroupRoleDB,
     getClientCodeDB,
     getGroupInfo,          // 👈 MAKE SURE THIS IS HERE

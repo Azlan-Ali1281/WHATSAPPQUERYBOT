@@ -22,10 +22,11 @@ CURRENT YEAR: ${currentYear}
   - Default rooms = 1.
 - **SPAM / MISSING DATA:** If the text is just normal chatting, a greeting, or lacks a clear hotel booking intent, return an EMPTY array [] for "queries".
 
-### 🏨 2. HOTEL IDENTIFICATION & ISOLATION
-- Identify the hotel name. Ignore guest names (e.g., "Ali", "Ahmed", "Mr.", "Pax").
-- If city (Makkah/Madinah) is mentioned, extract the hotel name next to it.
-- **MULTI-HOTEL ISOLATION:** If a user pastes multiple hotels in one message, you MUST strictly assign the correct room and dates ONLY to the hotel it was written under. Do not mix and match rooms between hotels. Another hotel's name acts as a wall/barrier.
+### 🏨 2. HOTEL IDENTIFICATION & HALLUCINATION PREVENTION (CRITICAL)
+- Identify the real, explicit hotel name. Ignore guest names (e.g., "Ali", "Ahmed", "Mr.", "Pax").
+- **NO HALLUCINATIONS:** If the user does NOT provide a specific hotel name (e.g., they only say "500 METER", "Any hotel", or just give dates), you MUST leave the "hotel" field as an empty string "".
+- **STRICT BANS:** NEVER use words like "CHK IN", "CHK OUT", "IN", "OUT", "METER", "DISTANCE", "NEAR", "NIGHTS", or city names (Makkah/Madinah alone) as the hotel name.
+- **MULTI-HOTEL ISOLATION:** If a user pastes multiple hotels in one message, you MUST strictly assign the correct room and dates ONLY to the hotel it was written under.
 
 ### 🛏️ 3. ROOM TYPES, OPTIONS & TYPOS
 - 1 → SINGLE | 2 → DOUBLE | 3 → TRIPLE | 4 → QUAD | 5 → QUINT
@@ -45,7 +46,7 @@ CURRENT YEAR: ${currentYear}
 {
   "queries": [
     {
-      "hotel": "Full Name",
+      "hotel": "Full Name OR empty string \\"\\"",
       "check_in": "YYYY-MM-DD",
       "check_out": "YYYY-MM-DD",
       "room_type": "TYPE",

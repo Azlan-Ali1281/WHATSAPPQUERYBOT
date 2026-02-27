@@ -1,0 +1,145 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    /* Main Search Box */
+    .archive-search-box {
+        background: white; 
+        padding: 25px; 
+        border-radius: 12px; 
+        border: 1px solid #e2e8f0; 
+        margin-bottom: 25px; 
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+    }
+
+    /* Grid layout for search */
+    .archive-form-grid {
+        display: grid; 
+        grid-template-columns: 2fr 1.5fr 1fr auto; 
+        gap: 15px; 
+        align-items: flex-end;
+    }
+
+    /* Standard Card */
+    .quote-card {
+        background: white; 
+        padding: 20px; 
+        border-radius: 12px; 
+        border: 1px solid #e2e8f0; /* Default border */
+        position: relative; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        transition: transform 0.2s ease;
+    }
+
+    /* 🛡️ THE FIX: Move logic to CSS classes instead of inline styles */
+    .quote-card.is-hybrid {
+        border: 1px solid #3b82f6;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    }
+
+    .quote-card:hover {
+        transform: translateY(-2px);
+    }
+
+    .vendor-pill {
+        background: #f1f5f9; 
+        color: #475569; 
+        padding: 3px 8px; 
+        border-radius: 4px; 
+        font-size: 11px; 
+        font-weight: 700; 
+        border: 1px solid #e2e8f0;
+    }
+
+    .hybrid-badge {
+        position: absolute; 
+        top: -10px; 
+        right: 15px; 
+        background: #3b82f6; 
+        color: white; 
+        padding: 3px 10px; 
+        border-radius: 20px; 
+        font-size: 10px; 
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+    }
+</style>
+
+<div class="grid-container">
+    <div class="archive-search-box">
+        <form action="/archive" method="GET" class="archive-form-grid">
+            <div>
+                <label style="font-size: 11px; font-weight: 700; color: #64748b; display: block; margin-bottom: 5px;">HOTEL NAME</label>
+                <select name="hotel" class="rule-input-sm" required style="width: 100%;">
+                    <option value="">Select Hotel...</option>
+                    <% uniqueHotels.forEach(h => { %>
+                        <option value="<%= h.hotel_name %>" <%= filters.hotel === h.hotel_name ? 'selected' : '' %>><%= h.hotel_name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div>
+                <label style="font-size: 11px; font-weight: 700; color: #64748b; display: block; margin-bottom: 5px;">STAY DATES</label>
+                <div style="display: flex; gap: 5px;">
+                    <input type="date" name="check_in" class="rule-input-sm" value="<%= filters.check_in %>" required>
+                    <input type="date" name="check_out" class="rule-input-sm" value="<%= filters.check_out %>" required>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding-bottom: 5px;">
+                <input type="checkbox" name="stitch" value="true" <%= filters.stitch === 'true' ? 'checked' : '' %>>
+                <span style="font-size: 12px; font-weight: 600; color: #1e293b;">Join Nights (Stitch)</span>
+            </div>
+            <button type="submit" class="btn-save-sm" style="height: 38px; padding: 0 25px;">🔍 Search Archive</button>
+        </form>
+    </div>
+
+    <% if (filters.hotel) { %>
+        <h3 style="font-size: 16px; margin-bottom: 20px; color: #1e293b;">Historical Data: <%= filters.hotel %></h3>
+        
+        <% if (results && results.length > 0) { %>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 20px;">
+                <% results.forEach(q => { 
+                    const isStitched = q.vendors_involved && q.vendors_involved.length > 1;
+                %>
+                <div class="quote-card <%= isStitched ? 'is-hybrid' : '' %>">
+                    
+                    <% if (isStitched) { %>
+                        <div class="hybrid-badge">HYBRID QUOTE</div>
+                    <% } %>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase;">Source Vendors</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+                            <% if (q.vendors_involved && q.vendors_involved.length > 0) { %>
+                                <% q.vendors_involved.forEach(v => { %>
+                                    <span class="vendor-pill"><%= v %></span>
+                                <% }); %>
+                            <% } else { %>
+                                <span class="vendor-pill">System Cache</span>
+                            <% } %>
+                        </div>
+                    </div>
+
+                    <div style="font-weight: 800; font-size: 19px; color: #1e293b; margin-bottom: 4px;"><%= q.hotel %></div>
+                    <div style="font-size: 13px; color: #64748b; margin-bottom: 15px; line-height: 1.4;">
+                        📅 <strong><%= q.check_in %></strong> to <strong><%= q.check_out %></strong><br>
+                        🛏️ <%= q.room_type %> | 🍽️ <%= q.applied_meal %> | 👁️ <%= q.applied_view %>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px dashed #e2e8f0; padding-top: 15px;">
+                        <div>
+                            <div style="font-size: 26px; font-weight: 900; color: #059669; line-height: 1;"><%= Math.round(q.total_price) %> <span style="font-size: 14px;">SAR</span></div>
+                            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Calculated Client Price</div>
+                        </div>
+                    </div>
+                </div>
+                <% }); %>
+            </div>
+        <% } else { %>
+            <div style="text-align: center; padding: 60px; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+                <p style="color: #94a3b8; font-size: 15px;">No historical rates found for this selection.</p>
+            </div>
+        <% } %>
+    <% } %>
+</div>
+
+<%- include('partials/footer.ejs') %>

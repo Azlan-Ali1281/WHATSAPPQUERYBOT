@@ -6,6 +6,7 @@ const {
 const { processLocalRates } = require('./v2/localRateEngine');
 
 const { initDatabase } = require('./database');
+const qrcode = require('qrcode-terminal');
 
 const { updateTiers, getCurrentTiers } = require('./v2/markupEngine');
 const { 
@@ -32,9 +33,6 @@ const {
 // ✅ CORRECT (Relative to index.js)
 const { calculateQuote } = require('./v2/calculator');
 const { formatForOwner } = require('./v2/formatter');
-
-
-const qrcode = require('qrcode-terminal')
 
 const { segmentClientQuery } = require('./aiBlockSegmenter')
 const { parseClientMessageWithAI } = require('./aiClientParser')
@@ -73,6 +71,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // ======================================================
 const PRODUCTION_MVP_MODE = true
 
+// Add this near the top of index.js
+let globalSock = null;
 // ======================================================
 // 👑 OWNER COMMAND HANDLER (Recall/Delete)
 // ======================================================
@@ -98,24 +98,39 @@ async function handleOwnerDeleteCommand(sock, msg, text) {
 
     try {
         let result;
+        // Assuming these functions return an object like: { pDeleted: 0, cDeleted: 0, messages: [] }
         if (type === 'P') result = recallLastParentQueries(count);
         else result = recallLastChildQueries(count);
 
+        // 🛑 SAFETY CHECK 1: Did the database actually return anything?
+        if (!result || (type === 'P' && result.pDeleted === 0) || (type === 'C' && result.cDeleted === 0)) {
+            await sock.sendMessage(groupId, { text: "📭 *No queries found!* The database is already clean." }, { quoted: msg });
+            return; // Stop the function here so it doesn't crash
+        }
+
         let delCount = 0;
         
-        // Loop through and command WhatsApp to "Delete for Everyone"
-        for (const m of result.messages) {
-            try {
-                await sock.sendMessage(m.vendor_group_id, { 
-                    delete: { remoteJid: m.vendor_group_id, fromMe: true, id: m.sent_message_id } 
-                });
-                delCount++;
-                await sleep(300); // Wait 300ms between deletes so WhatsApp doesn't block the bot
-            } catch (e) {
-                console.log(`⚠️ Failed to delete msg in ${m.vendor_group_id}`);
+        // 🛑 SAFETY CHECK 2: Ensure 'messages' exists and is an array before looping
+        if (result.messages && Array.isArray(result.messages) && result.messages.length > 0) {
+            for (const m of result.messages) {
+                // Skip if missing crucial data
+                if (!m.vendor_group_id || !m.sent_message_id) continue; 
+
+                try {
+                    await sock.sendMessage(m.vendor_group_id, { 
+                        delete: { remoteJid: m.vendor_group_id, fromMe: true, id: m.sent_message_id } 
+                    });
+                    delCount++;
+                    
+                    // Wait 300ms between deletes so WhatsApp doesn't block the bot
+                    await new Promise(resolve => setTimeout(resolve, 300)); 
+                } catch (e) {
+                    console.log(`⚠️ Failed to delete msg in ${m.vendor_group_id}`);
+                }
             }
         }
 
+        // Generate the final accurate report
         const report = type === 'P' 
             ? `✅ *RECALL COMPLETE*\n\n🗑️ Deleted ${result.pDeleted} Parent Queries\n🗑️ Deleted ${result.cDeleted} Child Queries\n💬 Recalled ${delCount} Vendor Messages.`
             : `✅ *RECALL COMPLETE*\n\n🗑️ Deleted ${result.cDeleted} Child Queries\n💬 Recalled ${delCount} Vendor Messages.`;
@@ -124,7 +139,7 @@ async function handleOwnerDeleteCommand(sock, msg, text) {
 
     } catch (err) {
         console.error("Recall Error:", err);
-        await sock.sendMessage(groupId, { text: "❌ Database error during deletion." }, { quoted: msg });
+        await sock.sendMessage(groupId, { text: "❌ Code error during deletion check your console." }, { quoted: msg });
     }
 }
 
@@ -422,8 +437,12 @@ function normalizeHotelForAI(hotel = '') {
 
   // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
   // Added: ashra
-  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|tripl|oct|nov|dec|again|check|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra)\b/i;
+// 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler/Distances)
+  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|tripl|oct|nov|dec|again|check|chk|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra|meter|meters|distance|near)\b/i;
   if (badPatterns.test(h)) return null;
+
+  // Kill tiny words like "IN" or "OUT" that might sneak past word boundaries
+  if (/^(in|out|any|n\/a|unknown)$/i.test(h)) return null;
 
   // 🛡️ 2. DATE & NUMBER BLOCKER
   if (/^\d{1,2}[\/\-]\d{1,2}/.test(h)) return null;
@@ -465,21 +484,113 @@ async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth')
   const { version } = await fetchLatestBaileysVersion()
 
-  const sock = makeWASocket({ auth: state, version })
-  sock.ev.on('creds.update', saveCreds)
+// ... inside your startBot() function ...
 
-  sock.ev.on('connection.update', ({ qr, connection }) => {
-    if (qr) qrcode.generate(qr, { small: true })
-    if (connection === 'open') console.log('✅ Bot connected')
-  })
+const sock = makeWASocket({ 
+    auth: state, 
+    version 
+    // Make sure 'printQRInTerminal' is REMOVED from here so the warning goes away!
+});
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg?.message || msg.key.fromMe) return;
+globalSock = sock;
 
-    const senderId = msg.key.participant || msg.key.remoteJid;
-    const groupId = msg.key.remoteJid;
-    const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+sock.ev.on('creds.update', saveCreds);
+
+sock.ev.on('connection.update', async (update) => {
+    // 1. We extract 'qr' along with connection and lastDisconnect
+    const { connection, lastDisconnect, qr } = update;
+
+    // 2. 🛡️ THE NEW FIX: If Baileys sends a QR string, draw it!
+    if (qr) {
+        console.log('\n📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:\n');
+        qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === 'close') {
+        const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log('❌ Connection closed. Reconnecting:', shouldReconnect);
+        if (shouldReconnect) {
+            startBot(); // Or connectToWhatsApp(), whatever your restart function is called
+        }
+    } else if (connection === 'open') {
+        console.log('✅ Bot connected to WhatsApp');
+        // ... the rest of your group sync logic stays exactly the same ...
+            // =========================================================
+            // 🌟 NEW: MASS SYNC ALL GROUPS ON STARTUP
+            // =========================================================
+            try {
+                console.log('🔄 Syncing WhatsApp groups with local database...');
+                const allGroups = await sock.groupFetchAllParticipating();
+                const { getGroupInfo, registerUnknownGroup } = require('./database');
+                
+                let addedCount = 0;
+                
+                // Loop through every group the bot is currently inside
+                for (const groupId in allGroups) {
+                    const groupData = allGroups[groupId];
+                    
+                    // If it's not in our database, register it!
+                    if (!getGroupInfo(groupId)) {
+                        registerUnknownGroup(groupId, groupData.subject);
+                        addedCount++;
+                    }
+                }
+                
+                console.log(`✅ Sync Complete! Added ${addedCount} new groups to the database.`);
+            } catch (err) {
+                console.error('⚠️ Failed to sync groups on startup:', err.message);
+            }
+        }
+    });
+
+sock.ev.on('messages.upsert', async ({ messages }) => {
+        const msg = messages[0];
+        if (!msg?.message || msg.key.fromMe) return;
+
+        const senderId = msg.key.participant || msg.key.remoteJid;
+        const groupId = msg.key.remoteJid;
+        const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+
+        // 1. Only process messages inside WhatsApp Groups
+        const isGroup = groupId.endsWith('@g.us');
+        if (!isGroup || !rawText) return; 
+
+        // 2. Fetch current group status from database
+        const { getGroupInfo, registerUnknownGroup } = require('./database');
+        let groupInfo = getGroupInfo(groupId);
+
+        // =========================================================
+        // 🌟 NEW: AUTO-REGISTER UNKNOWN GROUPS
+        // =========================================================
+        if (!groupInfo) {
+            try {
+                // Ask WhatsApp for the Group Name
+                const metadata = await sock.groupMetadata(groupId);
+                const groupName = metadata.subject || "Unnamed Group";
+                
+                // Save to database as 'UNKNOWN'
+                registerUnknownGroup(groupId, groupName);
+                
+                // Re-fetch the info so the bot knows it exists now
+                groupInfo = getGroupInfo(groupId); 
+            } catch (err) {
+                console.error(`⚠️ Failed to fetch group metadata for ${groupId}:`, err.message);
+                return; // Stop processing if WhatsApp refuses to give us the group info
+            }
+        }
+
+        // =========================================================
+        // 3. Role Verification (The Gatekeeper)
+        // =========================================================
+        
+        // If it's an UNKNOWN group, ignore all messages until Admin assigns a role
+        if (!groupInfo || groupInfo.role === 'UNKNOWN') return;
+
+        const role = groupInfo.role;
+        const isClient = role === 'CLIENT';
+        const isVendor = role === 'VENDOR';
+
+        // ... [The rest of your existing logic (Owner commands, Client Queries, Vendor Replies) continues below here] ...
 
 // ======================================================
     // 🚀 NEW COMMAND: /send (Forward Quote to Client)
@@ -614,45 +725,45 @@ async function startBot() {
     // 👤 PRIVATE MESSAGE AUTO-REPLY
     // ============================================================
     // If it is NOT a group message (doesn't end in @g.us), it's a DM.
-    if (!groupId?.endsWith('@g.us')) {
-        // Only reply if they actually sent some text, to avoid spamming system events
-        if (rawText.trim()) {
-            const autoReply = `*Salam! 👋*
+//     if (!groupId?.endsWith('@g.us')) {
+//         // Only reply if they actually sent some text, to avoid spamming system events
+//         if (rawText.trim()) {
+//             const autoReply = `*Salam! 👋*
 
-Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
+// Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
 
-*🤖 Main Kaisay Kaam Karta Hoon:*
-Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
+// *🤖 Main Kaisay Kaam Karta Hoon:*
+// Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
 
-*⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
+// *⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
 
-📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-• *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
+// 📞 *Contacts:*
+// • *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+// • *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
-*(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
+// *(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
 
----
+// ---
 
-*Salam! 👋*
+// *Salam! 👋*
 
-I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
+// I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
 
-*🤖 How I Work:*
-When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
+// *🤖 How I Work:*
+// When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
 
-*⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
+// *⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
 
-📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-• *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
+// 📞 *Contacts:*
+// • *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+// • *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
-*(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
+// *(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
 
-            await sock.sendMessage(groupId, { text: autoReply });
-        }
-        return; // Stop processing so it doesn't trigger the rest of the bot
-    }
+//             await sock.sendMessage(groupId, { text: autoReply });
+//         }
+//         return; // Stop processing so it doesn't trigger the rest of the bot
+//     }
 
     if (!rawText.trim()) return
 
@@ -666,7 +777,6 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
         return; // Stops the bot from processing this message
     }
 
-    const role = getGroupRoleDB(groupId);
 
 // ============================================================
     // 👑 COMMAND MODE: OWNER OVERRIDE (Bypasses Employee Check)
@@ -1501,32 +1611,42 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
           const allContextDates = [...new Set([...blockDateList, ...globalDateRanges])];          
           // ... rest of your AI call logic ...// 🛡️ SMART CONTEXT PROMPT
-const aiInput = protectDoubleTreeHotel([
-              `### TARGET HOTEL: ${hotel} (Identified in text as "${rawNameInText}")`,
-              `### MESSAGE CONTEXT: \n${effectiveText}`, 
+            // 🛡️ SMART CONTEXT PROMPT
+// 🛡️ SMART CONTEXT PROMPT (RESTORED TO 9 RULES)
+         // 🛡️ THE CONTEXT WINDOW: Physically isolate the lines near the hotel
+          const linesForWindow = effectiveText.split('\n');
+          const hotelLineIndex = linesForWindow.findIndex(l => l.toLowerCase().includes(rawNameInText.toLowerCase()));
+          
+          // Grab 3 lines above and 3 lines below to prevent "Stealing" from far-away sections
+          const startWindow = Math.max(0, hotelLineIndex - 3);
+          const endWindow = Math.min(linesForWindow.length, hotelLineIndex + 4);
+          const localContext = linesForWindow.slice(startWindow, endWindow).join('\n');
+
+          const aiInput = protectDoubleTreeHotel([
+              `### TARGET HOTEL: ${hotel}`,
+              `### LOCAL CONTEXT (Restricted View): \n${localContext}`, 
               `### DEFAULTS: Meal=${mealHint}, View=${viewHint}, Rooms=1`,
               
-              `--- EXTRACTION PROTOCOL (DO NOT IGNORE) ---`,
-              `1. THE ADJACENCY RULE: Usually, a hotel's date is IMMEDIATELY ABOVE or BELOW its name.`,
-              `2. MULTIPLE DATE OPTIONS: If the text lists multiple alternative dates for this hotel, you MUST create a SEPARATE query object in your array for EACH date range!`,
-              `3. THE "STEALING" TRAP: Never give Date A to Hotel B if they are separated by another hotel's name.`,
-              `4. THE BARRIER RULE: Another hotel's name is a WALL. You cannot "jump over" it to find a date.`,
-              `5. LIST / HEADER EXCEPTION (OVERRIDES BARRIER RULE): If there is a date at the top and a list of hotels below it (e.g., 1. Hotel A, 2. Hotel B), apply that top date to ALL hotels in the list!`,
-              `6. DATE MATH & FORMATS: "15 20 mar" = Check-in 15 Mar, Check-out 20 Mar.`,
-              `7. PAX & ROOM LOGIC: If text says "6 persons", use 6. OTHERWISE: Triple = 3, Quad = 4, Double/Twin = 2.`,
-              `8. MEALS & VIEWS: Use the hints (${mealHint}/${viewHint}) as defaults. ONLY change them if the text explicitly says otherwise.`,
+              `--- EXTRACTION PROTOCOL (STRICT 9 RULES) ---`,
+              `1. THE ADJACENCY RULE: ONLY extract the date range found within the LOCAL CONTEXT provided. Priority is the date immediately above or below the hotel name.`,
+              `2. THE BARRIER RULE: "Makkah" and "Madina" are impenetrable walls. Do not cross them to find a date.`,
+              `3. THE STEALING TRAP: Never give Date A to Hotel B if they belong to different sections.`,
+              `4. ANTI-GREED RULE: Do not extract every date in the text. Only return the specific date for ${hotel}.`,
+              `5. LIST / HEADER EXCEPTION: If the context shows a date at the top and this hotel is part of a numbered list below it, apply that top date.`,
+              `6. DATE MATH: "15 20 mar" = Check-in 15 Mar, Check-out 20 Mar.`,
+              `7. PAX & ROOM LOGIC: Triple=3, Quad=4, Double/Twin=2. Use explicit counts (e.g., "6 persons") if mentioned.`,
+              `8. MEALS & VIEWS: Use the hints (${mealHint}/${viewHint}) as defaults. Only change them if the local context explicitly says otherwise.`,
               `9. ISOLATION: Return data for "${hotel}" ONLY.`,
               
               `STRICT OUTPUT: Return ONLY a JSON object with the 'queries' array.`
           ].join('\n'));
-
           let ai;
           try { 
               ai = await parseClientMessageWithAI(aiInput); 
           } catch (err) { continue; }
             if (!ai?.queries) continue;
 
-          for (const qRaw of ai.queries) {
+            for (const qRaw of ai.queries) {
               // 🛑 SMART LIMIT: Max Child Queries Enforcer
               if (requestCount >= clientLimits.max_child_queries) {
                   limitReached = true;
@@ -1534,9 +1654,25 @@ const aiInput = protectDoubleTreeHotel([
               }
 
               const q = { ...qRaw };
-              if (!normalizeHotelForAI(q.hotel)) q.hotel = hotel;
-
               
+              // Only use the fallback if the fallback is ACTUALLY a valid hotel name
+              if (!normalizeHotelForAI(q.hotel)) {
+                  q.hotel = hotel;
+              }
+
+              // 🛡️ THE ULTIMATE BOUNCER: Absolute ban on these phrases reaching the database
+              const finalClean = q.hotel.toUpperCase().trim();
+              if (
+                  finalClean === 'IN' || 
+                  finalClean === 'OUT' || 
+                  finalClean.includes('CHK') || 
+                  finalClean.includes('METER') || 
+                  finalClean.includes('DISTANCE') ||
+                  finalClean === 'ANY' ||
+                  finalClean.length <= 2 // Real hotels are never 1 or 2 letters long
+              ) {
+                  q.hotel = ''; // Nuke it to an empty string so it hits Catch-All vendors
+              }
 
               if (q.check_out && q.check_out.includes('NaN')) {
                  const low = effectiveText.toLowerCase();
@@ -2023,3 +2159,456 @@ try {
 }
 
 startBot()
+
+// ... existing code (startBot, etc.) ...
+
+// ======================================================
+// 🌐 EXPRESS DASHBOARD (CONTROL PANEL)
+// ======================================================
+const express = require('express');
+const app = express();
+const { getGroupInfo, db, assignTierToGroup, upsertGroup } = require('./database'); 
+
+app.set('view engine', 'ejs');
+app.use(express.urlencoded({ extended: true })); 
+
+app.get('/', (req, res) => {
+    try {
+        // Safe check for Vendor Replies (in case the 'quotes' table isn't fully set up yet)
+        let totalReplies = 0;
+        try { totalReplies = db.prepare("SELECT COUNT(*) as count FROM quotes").get().count; } catch (e) {}
+
+        const stats = {
+            todayQueries: db.prepare("SELECT COUNT(*) as count FROM parent_queries WHERE date(created_at) = date('now')").get().count || 0,
+            totalParentQueries: db.prepare("SELECT COUNT(*) as count FROM parent_queries").get().count || 0,
+            totalChildQueries: db.prepare("SELECT COUNT(*) as count FROM child_queries").get().count || 0,
+            totalReplies: totalReplies,
+            activeClients: db.prepare("SELECT COUNT(*) as count FROM groups WHERE role = 'CLIENT'").get().count || 0,
+            activeVendors: db.prepare("SELECT COUNT(*) as count FROM groups WHERE role = 'VENDOR'").get().count || 0,
+        };
+
+        const graphData = db.prepare(`
+            SELECT date(created_at) as date, COUNT(*) as count 
+            FROM parent_queries 
+            WHERE created_at >= date('now', '-7 days')
+            GROUP BY date(created_at)
+            ORDER BY date ASC
+        `).all();
+
+        res.render('dashboard', { stats, graphData });
+    } catch (err) {
+        console.error("Dashboard Load Error:", err);
+        res.status(500).send("Database Error");
+    }
+});
+
+// 1. GROUP DIRECTORY PAGE
+app.get('/clients', (req, res) => {
+    try {
+        const groups = db.prepare("SELECT * FROM groups ORDER BY name ASC").all();
+        const tiers = db.prepare("SELECT tier_name FROM limit_tiers").all();
+        
+        // 🌟 NEW: Fetch all unique markup tiers from the markup_rules table
+        const markupTiers = db.prepare("SELECT DISTINCT client_code AS tier_name FROM markup_rules").all();
+        
+        res.render('clients', { groups, tiers, markupTiers });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error loading groups.");
+    }
+});
+
+// 2. INLINE QUICK UPDATE
+app.post('/group/:id/quick-update', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const { name, client_code, role, limit_tier, markup_tier } = req.body;
+
+        db.prepare(`
+            UPDATE groups 
+            SET name = ?, client_code = ?, role = ?, limit_tier = ?, markup_tier = ?
+            WHERE group_id = ?
+        `).run(name, client_code, role, limit_tier || 'NONE', markup_tier || 'DEFAULT', groupId);
+
+        res.redirect('/clients');
+    } catch (err) {
+        console.error("Update Error:", err);
+        res.status(500).send("Failed to update group.");
+    }
+});
+
+// Reuse your existing group detail route for the actual "Update Role" logic
+app.get('/group/:id', (req, res) => {
+    const info = db.prepare("SELECT * FROM groups WHERE group_id = ?").get(req.params.id);
+    const tiers = db.prepare("SELECT tier_name FROM limit_tiers").all();
+    res.render('group_edit', { info, tiers });
+});
+// 3. SAVE CHANGES: Handle Form Submission
+app.post('/group/update', (req, res) => {
+    const { group_id, name, limit_tier, client_code } = req.body;
+
+    try {
+        // Update Name and Client Code
+        const stmt = db.prepare("UPDATE groups SET name = ?, client_code = ?, limit_tier = ? WHERE group_id = ?");
+        stmt.run(name, client_code, limit_tier, group_id);
+        
+        console.log(`✅ Web Update: Modified ${name} (${group_id})`);
+        res.redirect('/');
+    } catch (err) {
+        console.error("❌ Web Update Failed:", err);
+        res.status(500).send("Error updating database.");
+    }
+});
+
+// Handle Group Updates
+app.post('/group/:id/update', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const groupId = req.params.id;
+        const { name, client_code, role, limit_tier } = req.body;
+
+        const stmt = db.prepare(`
+            UPDATE groups 
+            SET name = ?, client_code = ?, role = ?, limit_tier = ?
+            WHERE group_id = ?
+        `);
+        stmt.run(name, client_code, role, limit_tier, groupId);
+
+        // Redirect back to the client list after saving
+        res.redirect('/clients');
+    } catch (err) {
+        console.error("Update Error:", err);
+        res.status(500).send("Failed to update group.");
+    }
+});
+
+// ==========================================
+// 🏨 VENDOR MAPPING ROUTES
+// ==========================================
+
+// ==========================================
+// 🏢 VENDOR MANAGEMENT
+// ==========================================
+
+// 1. VIEW VENDORS PAGE
+app.get('/vendors', (req, res) => {
+    try {
+        const vendors = db.prepare("SELECT * FROM groups WHERE role = 'VENDOR' ORDER BY name ASC").all();
+
+        // Safely parse the JSON hotel lists so the frontend can read them
+        vendors.forEach(v => {
+            try { v.handled_hotels = JSON.parse(v.handled_hotels); } 
+            catch (e) { v.handled_hotels = []; }
+        });
+
+        // 🌟 IMPORT YOUR SANITIZER LIST HERE
+        const { OFFICIAL_REGISTRY } = require('./aiSanitizer');
+        
+        // Fallback just in case
+        const safeHotelList = Array.isArray(OFFICIAL_REGISTRY) ? OFFICIAL_REGISTRY : [
+            "Pullman Zamzam Madinah", "Anwar Al Madinah", "Makkah Towers", "Swissotel Makkah"
+        ];
+
+        res.render('vendors', { vendors, allHotels: safeHotelList });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error loading vendors.");
+    }
+});
+
+// 2. ADD HOTEL TO VENDOR
+app.post('/vendor/:id/add-hotel', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const vendorId = req.params.id;
+        const newHotel = req.body.hotel_name.trim();
+
+        const group = db.prepare("SELECT handled_hotels FROM groups WHERE group_id = ?").get(vendorId);
+        
+        if (group) {
+            let hotels = JSON.parse(group.handled_hotels || '[]');
+
+            // 🛡️ THE FIX: Add the new hotel, but DO NOT remove 'ALL' if it exists.
+            if (newHotel && !hotels.includes(newHotel)) {
+                hotels.push(newHotel);
+                db.prepare("UPDATE groups SET handled_hotels = ? WHERE group_id = ?").run(JSON.stringify(hotels), vendorId);
+            }
+        }
+        res.redirect('/vendors');
+    } catch (error) {
+        console.error("Error adding hotel mapping:", error);
+        res.status(500).send("Internal Server Error");
+    }
+});
+
+// 3. REMOVE HOTEL FROM VENDOR
+app.post('/vendor/:id/remove-hotel', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const { hotel_name } = req.body;
+        const vendorId = req.params.id;
+        const vendor = db.prepare("SELECT handled_hotels FROM groups WHERE group_id = ?").get(vendorId);
+        
+        if (vendor) {
+            let hotels = [];
+            try { hotels = JSON.parse(vendor.handled_hotels); } catch(e){}
+            
+            // Filter out the deleted hotel
+            hotels = hotels.filter(h => h !== hotel_name);
+            
+            db.prepare("UPDATE groups SET handled_hotels = ? WHERE group_id = ?").run(JSON.stringify(hotels), vendorId);
+        }
+        res.redirect('/vendors');
+    } catch (err) {
+        console.error("Remove Hotel Error:", err);
+        res.status(500).send("Failed to remove hotel.");
+    }
+});
+
+// ==========================================
+// ⚙️ RULES & LIMITS MANAGEMENT
+// ==========================================
+
+// --- PROFIT MARKUPS ---
+
+// 1. VIEW MARKUPS PAGE
+app.get('/rules/markup', (req, res) => {
+    try {
+        const markups = db.prepare("SELECT * FROM markup_rules ORDER BY client_code ASC, min_price ASC").all();
+        res.render('rules-markup', { markups });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error loading markups.");
+    }
+});
+
+// 2. ADD/UPDATE TIER INSIDE A RULE
+app.post('/rules/markup/add', express.urlencoded({ extended: true }), (req, res) => {
+    const { client_code, min_price, max_price, markup_amount } = req.body;
+    db.prepare(`
+        INSERT INTO markup_rules (client_code, min_price, max_price, markup_amount) 
+        VALUES (?, ?, ?, ?)
+    `).run(client_code, min_price, max_price, markup_amount);
+    res.redirect('/rules/markup');
+});
+
+// 3. DELETE ENTIRE RULE GROUP (e.g., all of VIP-B2B)
+app.post('/rules/markup/delete-group/:tierName', (req, res) => {
+    try {
+        const tierName = req.params.tierName;
+        if (tierName === 'DEFAULT') return res.status(400).send("Cannot delete the DEFAULT rule.");
+        
+        db.prepare("DELETE FROM markup_rules WHERE client_code = ?").run(tierName);
+        res.redirect('/rules/markup');
+    } catch (err) {
+        res.status(500).send("Failed to delete the rule group.");
+    }
+});
+
+// 4. DELETE SPECIFIC TIER ROW
+app.post('/rules/markup/delete-tier/:id', (req, res) => {
+    db.prepare("DELETE FROM markup_rules WHERE id = ?").run(req.params.id);
+    res.redirect('/rules/markup');
+});
+
+
+// --- USAGE LIMITS ---
+
+// 1. VIEW LIMITS PAGE
+app.get('/rules/limits', (req, res) => {
+    try {
+        const limits = db.prepare("SELECT * FROM limit_tiers ORDER BY tier_name ASC").all();
+        res.render('rules-limits', { limits });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error loading limits.");
+    }
+});
+
+// 2. ADD OR UPDATE A LIMIT TIER
+app.post('/rules/limits/upsert', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const { tier_name, max_child, max_hotel, max_date, max_room, max_daily } = req.body;
+        db.prepare(`
+            INSERT INTO limit_tiers (tier_name, max_child_queries, max_hotels_per_date, max_date_ranges, max_room_types, max_daily_queries)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tier_name) DO UPDATE SET
+                max_child_queries = excluded.max_child_queries,
+                max_hotels_per_date = excluded.max_hotels_per_date,
+                max_date_ranges = excluded.max_date_ranges,
+                max_room_types = excluded.max_room_types,
+                max_daily_queries = excluded.max_daily_queries
+        `).run(tier_name.toUpperCase(), max_child, max_hotel, max_date, max_room, max_daily || 30);
+        res.redirect('/rules/limits');
+    } catch (err) {
+        res.status(500).send("Failed to save limit tier.");
+    }
+});
+
+// 3. DELETE A LIMIT TIER
+app.post('/rules/limits/delete/:name', (req, res) => {
+    if (req.params.name !== 'DEFAULT') { // Prevent deleting the safety fallback
+        db.prepare("DELETE FROM limit_tiers WHERE tier_name = ?").run(req.params.name);
+    }
+    res.redirect('/rules/limits');
+});
+
+// ==========================================
+// 👨‍💼 EMPLOYEE MANAGEMENT
+// ==========================================
+
+// 1. VIEW EMPLOYEES & SCAN OWNER GROUPS DIRECTLY VIA WHATSAPP
+app.get('/employees', async (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        
+        const employees = db.prepare("SELECT * FROM employees ORDER BY created_at DESC").all();
+        // Check against the full JID (including @lid or @s.whatsapp.net)
+        const existingJids = new Set(employees.map(e => e.jid));
+        
+        let suggestedStaff = new Set();
+        const ownerGroups = db.prepare("SELECT group_id FROM groups WHERE role = 'OWNER'").all();
+        
+        if (globalSock) {
+            for (const group of ownerGroups) {
+                try {
+                    const metadata = await globalSock.groupMetadata(group.group_id);
+                    
+                    for (const participant of metadata.participants) {
+                        const rawId = participant.id || '';
+                        const parts = rawId.split('@');
+                        
+                        if (parts.length === 2) {
+                            // Strip device ID (e.g., :44) but KEEP the domain (@lid or @s.whatsapp.net)
+                            const cleanNumber = parts[0].split(':')[0];
+                            const domain = parts[1];
+                            const cleanJid = `${cleanNumber}@${domain}`;
+                            
+                            if (!existingJids.has(cleanJid)) {
+                                suggestedStaff.add(cleanJid);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.log(`⚠️ Could not fetch metadata for Owner Group: ${group.group_id}`);
+                }
+            }
+        }
+
+        res.render('employees', { 
+            employees, 
+            suggestedStaff: Array.from(suggestedStaff) 
+        });
+        
+    } catch (err) {
+        console.error("Error loading employees:", err);
+        res.status(500).send("Error loading employees.");
+    }
+});
+
+// 2. ADD OR UPDATE EMPLOYEE
+// 2. ADD OR UPDATE EMPLOYEE
+app.post('/employees/add', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        const { name, jid } = req.body;
+        
+        let cleanJid = jid.trim();
+        
+        // If it was manually typed without a domain, assume it's a standard phone number
+        if (!cleanJid.includes('@')) {
+            cleanJid = cleanJid.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        }
+        
+        db.prepare(`
+            INSERT INTO employees (jid, name) 
+            VALUES (?, ?) 
+            ON CONFLICT(jid) DO UPDATE SET name = ?
+        `).run(cleanJid, name, name);
+        
+        res.redirect('/employees');
+    } catch (err) {
+        console.error("Error adding employee:", err);
+        res.status(500).send("Failed to add employee.");
+    }
+});
+
+// 3. DELETE EMPLOYEE
+app.post('/employees/delete/:jid', (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        // URL decode the JID because it contains '@'
+        const targetJid = decodeURIComponent(req.params.jid);
+        
+        db.prepare("DELETE FROM employees WHERE jid = ?").run(targetJid);
+        res.redirect('/employees');
+    } catch (err) {
+        console.error("Error deleting employee:", err);
+        res.status(500).send("Failed to delete employee.");
+    }
+});
+
+// ==========================================
+// 🔍 VENDOR QUOTE ARCHIVE & SEARCH
+// ==========================================
+app.get('/archive', async (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+
+        // Populate Hotel Dropdown
+        const uniqueHotels = db.prepare(`
+            SELECT DISTINCT hotel_name FROM child_queries 
+            WHERE hotel_name IS NOT NULL AND hotel_name != ''
+            ORDER BY hotel_name ASC
+        `).all();
+
+        const { hotel, check_in, check_out, room_type, meal, view, stitch } = req.query;
+
+        let results = [];
+        let isHybrid = (stitch === 'true');
+
+        if (hotel && check_in && check_out) {
+            const { processLocalRates } = require('./v2/localRateEngine');
+            
+            // Setup query for the engine
+            const mockQuery = { 
+                hotel, 
+                check_in, 
+                check_out, 
+                room_type: room_type || 'DOUBLE', 
+                meal: meal || '',
+                view: view || '',
+                rooms: 1, 
+                persons: 2,
+                is_archive_test: true, // Prevents WA message sending
+                force_stitch: isHybrid   // Forces stitching if checkbox is ticked
+            };
+
+            // Phase 1 & 2 logic handled inside the engine
+            const data = await processLocalRates(mockQuery, null, null);
+            if (data && Array.isArray(data)) {
+                results = data;
+            }
+        }
+
+        res.render('archive', { 
+            uniqueHotels, 
+            results, // Unified variable name
+            filters: req.query,
+            isHybrid 
+        });
+    } catch (err) {
+        console.error("Archive Route Error:", err);
+        res.status(500).send("Error loading archive: " + err.message);
+    }
+});
+
+// ==========================================
+// 🚀 SERVER START
+// ==========================================
+const PORT = 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🚀 Dashboard running at http://localhost:${PORT}`);
+    console.log(`📶 WiFi Access (Use Laptop IP): http://YOUR_IP_HERE:${PORT}\n`);
+});

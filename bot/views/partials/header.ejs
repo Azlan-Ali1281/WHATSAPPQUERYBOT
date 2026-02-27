@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Turalex AI | Management</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #10b981; --primary-soft: rgba(16, 185, 129, 0.1);
+            --sidebar-bg: #0f172a; --bg: #f8fafc; --text-main: #0f172a;
+            --text-muted: #64748b; --border: #e2e8f0; --sidebar-width: 260px;
+        }
+        * { box-sizing: border-box; transition: all 0.2s ease-in-out; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; background: var(--bg); color: var(--text-main); display: flex; overflow: hidden; height: 100vh; }
+        
+        /* Sidebar */
+        #sidebar { width: var(--sidebar-width); background: var(--sidebar-bg); height: 100vh; display: flex; flex-direction: column; padding: 20px; color: white; z-index: 1000; }
+        #sidebar.collapsed { width: 80px; padding: 20px 10px; }
+        #sidebar.collapsed .nav-text, #sidebar.collapsed .logo-text, #sidebar.collapsed .menu-label, #sidebar.collapsed .chevron { display: none; }
+        #sidebar.collapsed .menu-item { justify-content: center; }
+
+        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; color: var(--primary); font-weight: 700; font-size: 20px; overflow: hidden; white-space: nowrap; }
+        .menu-label { color: #475569; font-size: 11px; text-transform: uppercase; margin-bottom: 12px; }
+        .menu-item { display: flex; align-items: center; gap: 12px; padding: 12px; color: #94a3b8; text-decoration: none; border-radius: 10px; cursor: pointer; margin-bottom: 4px; }
+        .menu-item:hover, .menu-item.active { background: var(--primary-soft); color: var(--primary); }
+        .chevron { margin-left: auto; width: 16px; transition: transform 0.3s; }
+        
+        .submenu { padding-left: 36px; margin-top: 4px; display: none; flex-direction: column; gap: 8px; }
+        .submenu.open { display: flex; margin-bottom: 12px; }
+        .submenu a { color: #94a3b8; text-decoration: none; font-size: 13px; padding: 5px 0; }
+        .submenu a:hover { color: white; }
+
+        /* Main Content */
+        #main-content { flex-grow: 1; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; width: 100%; }
+        
+        /* Header */
+        header { 
+            background: white; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; 
+            border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 500; 
+        }
+        
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        .header-right { display: flex; align-items: center; gap: 20px; }
+        .toggle-btn { cursor: pointer; background: #f1f5f9; border: none; padding: 8px; border-radius: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: center; }
+        
+        /* Pulsing Dot */
+        .status-pill { display: flex; align-items: center; gap: 8px; background: #ecfdf5; padding: 6px 12px; border-radius: 20px; border: 1px solid #a7f3d0; }
+        .pulse-dot { width: 8px; height: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .user-avatar { width: 36px; height: 36px; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+
+        /* Dashboard Grid */
+        .grid-container { padding: 32px; width: 100%; max-width: 1400px; margin: 0 auto; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+        .card { background: white; padding: 24px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); }
+        .card .icon-box { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+        .val { font-size: 28px; font-weight: 700; color: var(--text-main); }
+        .label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+
+        /* Mobile Adjustments */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 900; }
+        .mobile-nav { display: none; }
+
+        @media (max-width: 768px) {
+            #sidebar { position: fixed; left: -100%; width: 280px; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+            #sidebar.mobile-open { left: 0; }
+            .sidebar-overlay.active { display: block; }
+            
+            header { padding: 12px 20px; }
+            .status-pill span:not(.pulse-dot) { display: none; }
+            
+            .grid-container { padding: 20px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+            .card { padding: 16px; }
+            .val { font-size: 22px; }
+            
+            .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: white; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--border); z-index: 800; }
+            body { padding-bottom: 65px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar-overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+<aside id="sidebar">
+        <div class="logo">
+            <i data-lucide="zap" style="min-width: 24px;"></i> <span class="logo-text">TURALEX AI</span>
+        </div>
+<div class="menu-section">
+            <div class="menu-label">Control Panel</div>
+            
+            <div class="menu-item" onclick="toggleSub('group-nav')">
+                <i data-lucide="users"></i> <span class="nav-text">Groups</span><i data-lucide="chevron-down" class="chevron"></i>
+            </div>
+            <div class="submenu" id="group-nav">
+                <a href="/clients">Client Directory</a>
+                <a href="/vendors">Vendor Mapping</a>
+            </div>
+
+            <a href="/employees" class="menu-item">
+                <i data-lucide="contact"></i> <span class="nav-text">Staff / Employees</span>
+            </a>
+
+            <div class="menu-item" onclick="toggleSub('rules-nav')">
+                <i data-lucide="calculator"></i> <span class="nav-text">Rule Engine</span><i data-lucide="chevron-down" class="chevron"></i>
+            </div>
+            <div class="submenu" id="rules-nav">
+                <a href="/rules/markup">Profit Markups</a>
+                <a href="/rules/limits">Usage Limits</a>
+            </div>
+        </div>
+        </div>
+        </aside>
+
+    <main id="main-content">
+        <header>
+            <div class="header-left">
+                <button class="toggle-btn" onclick="toggleSidebar()"><i data-lucide="menu" style="width: 20px;"></i></button>
+                <div style="display: flex; flex-direction: column;">
+                    <span style="font-weight: 700; font-size: 15px;">Dashboard Overview</span>
+                    <span style="color: var(--text-muted); font-size: 11px;" id="live-date">Loading date...</span>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <div class="status-pill">
+                    <div class="pulse-dot"></div>
+                    <span style="color: #059669; font-size: 12px; font-weight: 700;">BOT ONLINE</span>
+                </div>
+                <div class="user-avatar">
+                    <i data-lucide="user" style="width: 18px;"></i>
+                </div>
+            </div>
+        </header>
+       

@@ -1,0 +1,76 @@
+ <footer style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 11px; margin-top: auto;">
+            Turalex AI &bull; WhatsApp Management &copy; 2026
+        </footer>
+    </main>
+
+    <div class="mobile-nav">
+        <a href="/" class="menu-item active" style="color: var(--primary);"><i data-lucide="layout-grid"></i></a>
+        <a href="/clients" class="menu-item" style="color: var(--text-muted);"><i data-lucide="users"></i></a>
+    </div>
+
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // Inject Live Date
+        const dateElement = document.getElementById('live-date');
+        if (dateElement) {
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            dateElement.innerText = new Date().toLocaleDateString('en-US', options);
+        }
+
+        // Sidebar Toggle
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('overlay');
+            if (window.innerWidth <= 768) { 
+                sidebar.classList.toggle('mobile-open'); 
+                overlay.classList.toggle('active'); 
+            } else { 
+                sidebar.classList.toggle('collapsed'); 
+            }
+        }
+
+        // Submenu Toggle
+        function toggleSub(id) {
+            const sub = document.getElementById(id);
+            if (!sub) return;
+            sub.classList.toggle('open');
+            const chev = sub.previousElementSibling.querySelector('.chevron');
+            if (chev) {
+                chev.style.transform = sub.classList.contains('open') ? 'rotate(180deg)' : 'rotate(0deg)';
+            }
+        }
+
+        // ==========================================
+        // 🚦 AUTO-HIGHLIGHT CURRENT PAGE
+        // ==========================================
+        document.addEventListener("DOMContentLoaded", () => {
+            const currentPath = window.location.pathname;
+            
+            // Find the <a> tag that perfectly matches the URL we are on
+            const activeLink = document.querySelector(`a[href="${currentPath}"]`);
+            
+            if (activeLink) {
+                // 1. Highlight the current link
+                activeLink.classList.add('active');
+                if (activeLink.closest('.submenu')) activeLink.style.color = 'var(--primary)';
+                
+                // 2. If it's inside a dropdown, open the dropdown automatically
+                const submenu = activeLink.closest('.submenu');
+                if (submenu) {
+                    submenu.classList.add('open');
+                    
+                    // Highlight the parent "folder" (like Groups)
+                    const parentMenu = submenu.previousElementSibling;
+                    if (parentMenu) {
+                        parentMenu.classList.add('active');
+                        const chev = parentMenu.querySelector('.chevron');
+                        if (chev) chev.style.transform = 'rotate(180deg)';
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

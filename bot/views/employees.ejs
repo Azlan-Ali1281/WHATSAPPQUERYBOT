@@ -1,0 +1,136 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 24px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); margin-bottom: 24px; }
+    .card-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text-main); border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
+    
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 20px; }
+    th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 2px solid #f1f5f9; }
+    td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
+
+    .employee-name { font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+    .employee-jid { font-family: monospace; color: #64748b; font-size: 12px; background: #f1f5f9; padding: 3px 6px; border-radius: 4px; }
+    
+    .add-form-bg { background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px dashed #cbd5e1; }
+    .rule-input-sm { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; width: 100%; outline: none; background: white; }
+    .rule-input-sm:focus { border-color: var(--primary); }
+    
+    .btn-save-sm { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+    .btn-save-sm:hover { background: #059669; }
+    
+    .btn-del { background: none; border: none; color: #ef4444; cursor: pointer; transition: color 0.2s; padding: 4px; }
+    .btn-del:hover { color: #b91c1c; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+
+    @media (max-width: 768px) {
+        .grid-2 { grid-template-columns: 1fr; }
+        .form-row { flex-direction: column; }
+        .btn-save-sm { width: 100%; }
+    }
+</style>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">Employee Management</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Manage staff who are ignored by the bot's auto-replies.</p>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title"><i data-lucide="user-check" style="color: #10b981;"></i> Active Team Members</div>
+            
+            <% if (employees.length === 0) { %>
+                <div style="text-align: center; padding: 30px; color: var(--text-muted);">
+                    <i data-lucide="users" style="width: 40px; height: 40px; opacity: 0.5; margin-bottom: 10px;"></i>
+                    <p>No employees registered yet.</p>
+                </div>
+            <% } else { %>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Staff Name</th>
+                                <th>WhatsApp ID</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% employees.forEach(emp => { %>
+                            <tr>
+                                <td>
+                                    <div class="employee-name">
+                                        <div style="width: 32px; height: 32px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #475569;">
+                                            <%= emp.name.charAt(0).toUpperCase() %>
+                                        </div>
+                                        <%= emp.name %>
+                                    </div>
+                                </td>
+                                <td><span class="employee-jid"><%= emp.jid.split('@')[0] %></span></td>
+                                <td style="text-align: right;">
+                                    <form action="/employees/delete/<%= encodeURIComponent(emp.jid) %>" method="POST" onsubmit="return confirm('Remove <%= emp.name %> from employees?')">
+                                        <button class="btn-del" title="Remove Employee"><i data-lucide="user-minus" style="width:18px;"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+            <% } %>
+        </div>
+
+        <div>
+            <div class="card" style="margin-bottom: 24px; border-color: #bfdbfe; background: #eff6ff;">
+                <div class="card-title" style="border-bottom-color: #dbeafe; color: #1e3a8a;">
+                    <i data-lucide="radar" style="color: #3b82f6;"></i> Scan: Owner Groups
+                </div>
+                
+                <p style="font-size: 13px; color: #475569; margin-bottom: 16px;">
+                    The bot detected these phone numbers sending messages inside your <strong>OWNER</strong> groups. Quickly add them as staff:
+                </p>
+
+                <% if (suggestedStaff.length === 0) { %>
+                    <div style="padding: 12px; background: white; border-radius: 8px; color: #64748b; font-size: 13px; text-align: center;">
+                        No new unassigned members detected.
+                    </div>
+                <% } else { %>
+<form action="/employees/add" method="POST" style="display: flex; gap: 10px; flex-direction: column;">
+                        <select name="jid" class="rule-input-sm" required>
+                            <option value="" disabled selected>Select a detected number or ID...</option>
+                            <% suggestedStaff.forEach(fullJid => { 
+                                const isLid = fullJid.includes('@lid');
+                                const displayId = fullJid.split('@')[0];
+                            %>
+                                <option value="<%= fullJid %>">
+                                    <%= isLid ? `[Internal ID] ${displayId}` : `[Phone] +${displayId}` %>
+                                </option>
+                            <% }); %>
+                        </select>
+                        <div class="form-row" style="display: flex; gap: 10px;">
+                            <input type="text" name="name" class="rule-input-sm" placeholder="Employee Name" required>
+                            <button type="submit" class="btn-save-sm" style="background: #3b82f6;">+ Add</button>
+                        </div>
+                    </form>
+                <% } %>
+            </div>
+
+            <div class="card add-form-bg" style="box-shadow: none;">
+                <div class="card-title" style="border-bottom: none; padding-bottom: 0;"><i data-lucide="user-plus"></i> Manual Add</div>
+                <form action="/employees/add" method="POST" style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">EMPLOYEE NAME</label>
+                        <input type="text" name="name" class="rule-input-sm" placeholder="e.g. Shaheer" required>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">WHATSAPP NUMBER (with country code)</label>
+                        <input type="text" name="jid" class="rule-input-sm" placeholder="e.g. 923162724750" required>
+                    </div>
+                    <button type="submit" class="btn-save-sm" style="background: #1e293b; margin-top: 8px;">Save Employee</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('partials/footer.ejs') %>

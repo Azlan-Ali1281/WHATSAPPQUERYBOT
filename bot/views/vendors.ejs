@@ -1,0 +1,155 @@
+<%- include('partials/header.ejs') %>
+
+<style>
+    .vendor-card { background: white; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); padding: 24px; margin-bottom: 24px; }
+    .vendor-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    
+    .vendor-title { font-size: 18px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
+    .vendor-code { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 6px; font-family: monospace; font-size: 13px; font-weight: 700; }
+
+    /* Hotel Tags */
+    .hotel-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+    .hotel-tag { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; word-break: break-word; }
+    .btn-remove { background: none; border: none; color: #60a5fa; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: color 0.2s; }
+    .btn-remove:hover { color: #dc2626; }
+    .tag-all { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+
+    /* Form Layouts */
+    .mapping-actions { display: flex; flex-direction: column; gap: 12px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1; }
+    .add-hotel-form { display: flex; gap: 12px; align-items: center; width: 100%; }
+    
+    .btn-add { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+    .btn-add:hover { background: #059669; }
+    
+    /* 🛡️ NEW: Catch-All Button */
+    .btn-catch-all { background: white; border: 1px solid #fecaca; color: #dc2626; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+    .btn-catch-all:hover { background: #fef2f2; border-color: #ef4444; }
+
+    /* Autocomplete */
+    .autocomplete-wrapper { position: relative; flex-grow: 1; display: flex; align-items: center; gap: 12px; width: 100%; }
+    .search-input { width: 100%; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; background: white; }
+    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+    
+    .autocomplete-list { position: absolute; top: calc(100% + 4px); left: 30px; right: 0; background: white; border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 0; list-style: none; max-height: 250px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); display: none; }
+    .autocomplete-list.active { display: block; }
+    .autocomplete-item { padding: 12px 16px; font-size: 14px; color: var(--text-main); cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+    .autocomplete-item:hover { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+
+    /* 📱 MOBILE OPTIMIZATIONS */
+    @media (max-width: 768px) {
+        .vendor-card { padding: 16px; }
+        .vendor-header { flex-direction: column; gap: 8px; }
+        .add-hotel-form { flex-direction: column; align-items: stretch; }
+        .autocomplete-wrapper { width: 100%; }
+        .autocomplete-list { left: 0; }
+        .btn-add { width: 100%; }
+    }
+</style>
+
+<div class="grid-container">
+    <div style="margin-bottom: 24px;">
+        <h1 style="margin: 0 0 4px 0; font-size: 24px;">Vendor Mapping</h1>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Assign specific hotels or set fallback rules for your vendors.</p>
+    </div>
+
+    <% if (vendors.length === 0) { %>
+        <div class="vendor-card" style="text-align: center; color: var(--text-muted); padding: 48px;">
+            <i data-lucide="building-2" style="width: 48px; height: 48px; opacity: 0.5; margin-bottom: 12px;"></i>
+            <br>No vendors found. Go to the Groups tab to assign the VENDOR role first.
+        </div>
+    <% } %>
+
+    <% vendors.forEach(vendor => { %>
+        <div class="vendor-card">
+            <div class="vendor-header">
+                <div class="vendor-title">
+                    <i data-lucide="building-2" style="width: 20px; color: #64748b;"></i> 
+                    <%= vendor.name %>
+                </div>
+                <div class="vendor-code">#<%= vendor.client_code %></div>
+            </div>
+
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">Currently Handling:</div>
+            
+            <div class="hotel-grid">
+                <% if (vendor.handled_hotels.length === 0) { %>
+                    <span style="color: #94a3b8; font-size: 13px; font-style: italic;">No hotels mapped. They will receive NO queries.</span>
+                <% } %>
+                
+                <% vendor.handled_hotels.forEach(hotel => { %>
+                    <div class="hotel-tag <%= hotel === 'ALL' ? 'tag-all' : '' %>">
+                        <%= hotel === 'ALL' ? '🚨 CATCH-ALL (RECEIVING ALL QUERIES)' : hotel %>
+                        <form action="/vendor/<%= vendor.group_id %>/remove-hotel" method="POST" style="margin: 0; display: flex;">
+                            <input type="hidden" name="hotel_name" value="<%= hotel %>">
+                            <button type="submit" class="btn-remove" title="Remove Hotel"><i data-lucide="x" style="width: 14px; height: 14px;"></i></button>
+                        </form>
+                    </div>
+                <% }); %>
+            </div>
+
+            <div class="mapping-actions">
+                <form action="/vendor/<%= vendor.group_id %>/add-hotel" method="POST" class="add-hotel-form">
+                    <div class="autocomplete-wrapper">
+                        <i data-lucide="search" style="width: 18px; color: #94a3b8;"></i>
+                        <input type="text" name="hotel_name" class="search-input auto-input" placeholder="Search Database..." autocomplete="off" required>
+                        <ul class="autocomplete-list"></ul>
+                    </div>
+                    <button type="submit" class="btn-add">Add Mapping</button>
+                </form>
+
+                <% if (!vendor.handled_hotels.includes('ALL')) { %>
+                    <form action="/vendor/<%= vendor.group_id %>/add-hotel" method="POST">
+                        <input type="hidden" name="hotel_name" value="ALL">
+                        <button type="submit" class="btn-catch-all">
+                            <i data-lucide="shield-alert" style="width: 16px;"></i> Set as Fallback Vendor (ALL)
+                        </button>
+                    </form>
+                <% } %>
+            </div>
+        </div>
+    <% }); %>
+
+</div>
+
+<div id="hotel-data-bridge" data-hotels='<%- JSON.stringify(allHotels || []) %>'></div>
+
+<script>
+    const dataBridge = document.getElementById('hotel-data-bridge');
+    const MASTER_HOTEL_LIST = JSON.parse(dataBridge.getAttribute('data-hotels') || '[]');
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const wrappers = document.querySelectorAll('.autocomplete-wrapper');
+
+        wrappers.forEach(wrapper => {
+            const input = wrapper.querySelector('.auto-input');
+            const list = wrapper.querySelector('.autocomplete-list');
+
+            const renderList = (filterText = '') => {
+                list.innerHTML = '';
+                const query = filterText.toLowerCase().trim();
+                const filtered = MASTER_HOTEL_LIST.filter(hotel => hotel.toLowerCase().includes(query));
+
+                if (filtered.length === 0) {
+                    list.innerHTML = `<li class="autocomplete-item" style="color: #94a3b8; cursor: not-allowed;">No hotels found...</li>`;
+                } else {
+                    filtered.forEach(hotel => {
+                        const li = document.createElement('li');
+                        li.className = 'autocomplete-item';
+                        li.textContent = hotel;
+                        li.addEventListener('mousedown', () => {
+                            input.value = hotel;
+                            list.classList.remove('active');
+                        });
+                        list.appendChild(li);
+                    });
+                }
+            };
+
+            input.addEventListener('focus', () => { renderList(input.value); list.classList.add('active'); });
+            input.addEventListener('input', (e) => { renderList(e.target.value); list.classList.add('active'); });
+            input.addEventListener('blur', () => { setTimeout(() => list.classList.remove('active'), 150); });
+        });
+    });
+</script>
+
+<%- include('partials/footer.ejs') %>
