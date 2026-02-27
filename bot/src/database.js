@@ -475,6 +475,37 @@ function recallLastParentQueries(count) {
     return { messages, pDeleted: pIds.length, cDeleted: cIds.length };
 }
 
+function normalizeHotelName(name) {
+  return name
+    ?.toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// 2. Updated to include common variations to ignore
+// 🛡️ FIX: Added MAKKAH, MADINAH, MADINA to generic words
+const GENERIC_WORDS = new Set([
+  'HOTEL', 'TOWER', 'TOWERS', 'INN', 'SUITES', 'SUITE', 
+  'RESORT', 'APARTMENT', 'APARTMENTS', 'AL', 'EL', 
+  'MAKKAH', 'MADINAH', 'MADINA', 'MECCA', 'MEDINA'
+]);
+
+function splitMeaningfulWords(text) {
+  const words = text.split(' ').filter(w => w.length >= 2);
+  
+  // Try to filter out generic words
+  const meaningful = words.filter(w => !GENERIC_WORDS.has(w));
+  
+  // 🛡️ THE FIX: If the filter deleted EVERYTHING (e.g., "Makkah Towers"), 
+  // then just return the original words so it can still try to match.
+  if (meaningful.length === 0 && words.length > 0) {
+      return words;
+  }
+  
+  return meaningful;
+}
+
 function recallLastChildQueries(count) {
     const children = db.prepare('SELECT id FROM child_queries ORDER BY id DESC LIMIT ?').all(count);
     if (!children.length) return { messages: [], cDeleted: 0 };
