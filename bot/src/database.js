@@ -367,26 +367,47 @@ function getOwnerGroupsDB() {
 
 // 5. Get Vendors for a specific hotel
 function getVendorsForHotelDB(hotelName) {
-    const rows = db.prepare(`SELECT group_id, handled_hotels FROM groups WHERE role = 'VENDOR'`).all();
-    const matchedVendors = [];
-    const hName = hotelName.toLowerCase();
+    const normalizedInput = normalizeHotelName(hotelName);
+    const inputWords = splitMeaningfulWords(normalizedInput);
+    
+    const allVendors = db.prepare(`SELECT group_id, handled_hotels FROM groups WHERE role = 'VENDOR'`).all();
+    
+    const specificMatches = new Set();
+    const defaultVendors = new Set();
 
-    for (const row of rows) {
+    for (const vendor of allVendors) {
+        let handled;
         try {
-            const hotels = JSON.parse(row.handled_hotels);
-            if (hotels.includes('ALL')) {
-                matchedVendors.push(row.group_id);
-                continue;
+            handled = JSON.parse(vendor.handled_hotels);
+        } catch (e) { continue; }
+
+        // 1. Sort into "Defaults" and "Specific Match Candidates"
+        if (handled.includes('ALL')) {
+            defaultVendors.add(vendor.group_id);
+            continue; // Skip keyword check for catch-all vendors
+        }
+
+        // 2. Keyword Matching for specific hotel mappings
+        for (const targetHotel of handled) {
+            const targetWords = splitMeaningfulWords(normalizeHotelName(targetHotel));
+            if (targetWords.length === 0) continue;
+
+            const isMatch = targetWords.every(word => inputWords.includes(word));
+            if (isMatch) {
+                specificMatches.add(vendor.group_id);
+                break; 
             }
-            // Check if any handled brand matches the requested hotel name
-            if (hotels.some(brand => hName.includes(brand.toLowerCase()))) {
-                matchedVendors.push(row.group_id);
-            }
-        } catch (e) {
-            console.error("Failed to parse vendor hotels for", row.group_id);
         }
     }
-    return matchedVendors;
+
+    // 🏆 THE PRIORITY LOGIC:
+    // If we found ANY specific vendor for this hotel, return ONLY them.
+    if (specificMatches.size > 0) {
+        return Array.from(specificMatches);
+    }
+
+    // If NO specific vendor was found, return the 4 default vendors.
+    return Array.from(defaultVendors);
 }
 
 

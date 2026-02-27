@@ -148,12 +148,17 @@ try {
     vendorHotels[902] = ['ALL'];
     vendorHotels[905] = ['ALL'];
 
+// 5. Final Insertion Loop
     let vendorCount = 0;
     for (const [vid, data] of Object.entries(VENDORS)) {
-        const handled = vendorHotels[vid] && vendorHotels[vid].length > 0 ? vendorHotels[vid] : ['ALL'];
+        // Only use the calculated list. If it's empty, it stays empty [].
+        // This prevents random vendors from becoming defaults.
+        const handled = vendorHotels[vid];
+        
         upsertGroup(data.jid, 'VENDOR', 'REQ', handled, data.name);
         vendorCount++;
     }
+    console.log(`✅ Migrated ${vendorCount} Live Vendors.`);
     console.log(`✅ Migrated ${vendorCount} Live Vendors with specific Hotel Maps and names.`);
 
     console.log("\n🎉 LIVE MIGRATION COMPLETE! The database is ready for Turalex.");
