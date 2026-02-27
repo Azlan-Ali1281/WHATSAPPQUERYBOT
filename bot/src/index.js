@@ -1,7 +1,8 @@
 const {
   default: makeWASocket,
   useMultiFileAuthState,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  DisconnectReason // 👈 ADD THIS HERE
 } = require('@whiskeysockets/baileys')
 const { processLocalRates } = require('./v2/localRateEngine');
 
