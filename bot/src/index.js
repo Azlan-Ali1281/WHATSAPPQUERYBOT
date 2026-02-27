@@ -482,67 +482,60 @@ function normalizeHotelForAI(hotel = '') {
 // 🚀 BOT START
 // ======================================================
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState('./auth')
+  // Change this line:
+const { state, saveCreds } = await useMultiFileAuthState('./auth_main') // 🛡️ NEW FOLDER NAME
   const { version } = await fetchLatestBaileysVersion()
 
 // ... inside your startBot() function ...
 
-const sock = makeWASocket({ 
-    auth: state, 
-    version 
-    // Make sure 'printQRInTerminal' is REMOVED from here so the warning goes away!
+const sock = makeWASocket({
+    auth: state,
+    version,
+    // 🛡️ Pretend to be an iPad (this often breaks the "Conflict" loop on PC)
+    browser: ["iPad", "Safari", "15.0"], 
+    
+    syncFullHistory: false,
+    shouldSyncHistoryMessage: () => false,
+    
+    connectTimeoutMs: 120000, 
+    defaultQueryTimeoutMs: 120000,
+    keepAliveIntervalMs: 60000,
 });
 
 globalSock = sock;
 
 sock.ev.on('creds.update', saveCreds);
 
+// 🛡️ SURGICAL FIX 2: Reconnection & Delayed Sync
 sock.ev.on('connection.update', async (update) => {
-    // 1. We extract 'qr' along with connection and lastDisconnect
     const { connection, lastDisconnect, qr } = update;
 
-    // 2. 🛡️ THE NEW FIX: If Baileys sends a QR string, draw it!
     if (qr) {
-        console.log('\n📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:\n');
+        console.log('\n📱 SCAN QR CODE:\n');
         qrcode.generate(qr, { small: true });
     }
 
     if (connection === 'close') {
-        const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log('❌ Connection closed. Reconnecting:', shouldReconnect);
-        if (shouldReconnect) {
-            startBot(); // Or connectToWhatsApp(), whatever your restart function is called
-        }
+        const statusCode = lastDisconnect.error?.output?.statusCode;
+        
+        // 🛡️ CIRCUIT BREAKER: If Conflict (replaced) or Service Unavailable, WAIT.
+        const needsLongWait = [428, 440, 503, 515, 408].includes(statusCode);
+        const waitTime = needsLongWait ? 30000 : 5000; // 30s vs 5s
+        
+        console.log(`❌ Connection Error ${statusCode}. Retrying in ${waitTime/1000}s...`);
+        
+        // Clear globalSock to prevent memory leaks during the loop
+        globalSock = null;
+        setTimeout(() => startBot(), waitTime);
+
     } else if (connection === 'open') {
-        console.log('✅ Bot connected to WhatsApp');
-        // ... the rest of your group sync logic stays exactly the same ...
-            // =========================================================
-            // 🌟 NEW: MASS SYNC ALL GROUPS ON STARTUP
-            // =========================================================
-            try {
-                console.log('🔄 Syncing WhatsApp groups with local database...');
-                const allGroups = await sock.groupFetchAllParticipating();
-                const { getGroupInfo, registerUnknownGroup } = require('./database');
-                
-                let addedCount = 0;
-                
-                // Loop through every group the bot is currently inside
-                for (const groupId in allGroups) {
-                    const groupData = allGroups[groupId];
-                    
-                    // If it's not in our database, register it!
-                    if (!getGroupInfo(groupId)) {
-                        registerUnknownGroup(groupId, groupData.subject);
-                        addedCount++;
-                    }
-                }
-                
-                console.log(`✅ Sync Complete! Added ${addedCount} new groups to the database.`);
-            } catch (err) {
-                console.error('⚠️ Failed to sync groups on startup:', err.message);
-            }
-        }
-    });
+        console.log('✅ Bot Connected. ACCOUNT RECOVERY MODE: Standing by for 5 minutes...');
+        
+        // 🛡️ DO ABSOLUTELY NOTHING FOR 5 MINUTES
+        // This lets the main account "settle" its background encryption keys.
+        // Sync is completely disabled for now.
+    }
+});
 
 sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
