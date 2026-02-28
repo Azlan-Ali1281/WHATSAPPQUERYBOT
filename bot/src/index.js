@@ -491,15 +491,20 @@ const { state, saveCreds } = await useMultiFileAuthState('./auth_main') // 🛡�
 const sock = makeWASocket({
     auth: state,
     version,
-    // 🛡️ Pretend to be an iPad (this often breaks the "Conflict" loop on PC)
-    browser: ["iPad", "Safari", "15.0"], 
+    // 🛡️ 1. STABLE IDENTITY: "Ubuntu" handles large data packets best
+    browser: ["Ubuntu", "Chrome", "110.0.0"], 
     
+    // 🛡️ 2. STOP THE FLOOD: Prevent 503 Service Unavailable
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
+    markOnlineOnConnect: false, // 👈 MAGIC BULLET: Stops WhatsApp from flooding you with group presence updates
     
-    connectTimeoutMs: 120000, 
-    defaultQueryTimeoutMs: 120000,
-    keepAliveIntervalMs: 60000,
+    // 🛡️ 3. FIX 408 TIMEOUTS: Keep the heartbeat fast so the socket doesn't die
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 10000, // 👈 Ping every 10 seconds to maintain the line
+    
+    // 🛡️ 4. FIX 440 ERRORS: Catch failed decryption messages so they don't loop
+    getMessage: async (key) => { return { conversation: 'HBA_Bot' } }
 });
 
 globalSock = sock;
