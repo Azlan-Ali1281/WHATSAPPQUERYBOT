@@ -6,6 +6,8 @@ const {
 } = require('@whiskeysockets/baileys')
 const { processLocalRates } = require('./v2/localRateEngine');
 
+let isReconnecting = false; // 🛡️ THE LOCK
+
 const { initDatabase } = require('./database');
 const qrcode = require('qrcode-terminal');
 
@@ -491,26 +493,28 @@ const { state, saveCreds } = await useMultiFileAuthState('./auth_main') // 🛡�
 const sock = makeWASocket({
     auth: state,
     version,
-    // 🛡️ 1. STABLE IDENTITY: "Ubuntu" handles large data packets best
-    browser: ["Ubuntu", "Chrome", "110.0.0"], 
+    browser: ["Windows", "Chrome", "110.0.0"], // Revert to standard Windows to avoid mobile-to-mobile bugs
     
-    // 🛡️ 2. STOP THE FLOOD: Prevent 503 Service Unavailable
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
-    markOnlineOnConnect: false, // 👈 MAGIC BULLET: Stops WhatsApp from flooding you with group presence updates
+    generateHighQualityLinkPreview: false, // 👈 STOPS heavy processing
     
-    // 🛡️ 3. FIX 408 TIMEOUTS: Keep the heartbeat fast so the socket doesn't die
-    connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 10000, // 👈 Ping every 10 seconds to maintain the line
+    // Give the socket maximum breathing room during the initial flood
+    connectTimeoutMs: 120000,
+    keepAliveIntervalMs: 30000, 
     
-    // 🛡️ 4. FIX 440 ERRORS: Catch failed decryption messages so they don't loop
     getMessage: async (key) => { return { conversation: 'HBA_Bot' } }
 });
 
 globalSock = sock;
 
+// 🛡️ SURGICAL FIX: Drop heavy history payloads instantly
+sock.ev.on('messaging-history.set', () => {
+    console.log('🗑️ History sync detected and PURGED to prevent Termux memory crash.');
+});
 sock.ev.on('creds.update', saveCreds);
 
+// 🛡️ SURGICAL FIX 2: Reconnection & Delayed Sync
 // 🛡️ SURGICAL FIX 2: Reconnection & Delayed Sync
 sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -521,24 +525,46 @@ sock.ev.on('connection.update', async (update) => {
     }
 
     if (connection === 'close') {
-        const statusCode = lastDisconnect.error?.output?.statusCode;
+        if (isReconnecting) return; 
+        isReconnecting = true; 
+
+        // 🛡️ Safe Error Parsing
+        const error = lastDisconnect?.error;
+        const statusCode = error?.output?.statusCode || error?.output?.payload?.statusCode || 500;
         
-        // 🛡️ CIRCUIT BREAKER: If Conflict (replaced) or Service Unavailable, WAIT.
+        // 🛡️ DO NOT RECONNECT IF LOGGED OUT INTENTIONALLY
+        if (statusCode === DisconnectReason.loggedOut) {
+            console.log('❌ Device logged out. Please delete the auth folder and scan again.');
+            isReconnecting = false;
+            return;
+        }
+
         const needsLongWait = [428, 440, 503, 515, 408].includes(statusCode);
-        const waitTime = needsLongWait ? 30000 : 5000; // 30s vs 5s
+        const waitTime = needsLongWait ? 30000 : 5000;
         
         console.log(`❌ Connection Error ${statusCode}. Retrying in ${waitTime/1000}s...`);
         
-        // Clear globalSock to prevent memory leaks during the loop
-        globalSock = null;
-        setTimeout(() => startBot(), waitTime);
+        // 🛡️ THE CLEAN KILL: Destroy the old socket properly
+        if (globalSock) {
+            globalSock.ev.removeAllListeners();
+            try {
+                 globalSock.ws.close(); 
+            } catch (e) {
+                 // Ignore errors if the socket is already dead
+            }
+            globalSock = null;
+        }
+
+        // 🛡️ THE WAIT
+        setTimeout(() => {
+            console.log("🔄 Attempting to reconnect now...");
+            isReconnecting = false; 
+            startBot();
+        }, waitTime);
 
     } else if (connection === 'open') {
+        isReconnecting = false; 
         console.log('✅ Bot Connected. ACCOUNT RECOVERY MODE: Standing by for 5 minutes...');
-        
-        // 🛡️ DO ABSOLUTELY NOTHING FOR 5 MINUTES
-        // This lets the main account "settle" its background encryption keys.
-        // Sync is completely disabled for now.
     }
 });
 
@@ -2148,12 +2174,6 @@ try {
       return; 
     }
 
-  })
-  sock.ev.on('connection.update', ({ connection }) => {
-    if (connection === 'close') {
-      console.log('❌ Connection closed, restarting...')
-      startBot()
-    }
   })
 }
 

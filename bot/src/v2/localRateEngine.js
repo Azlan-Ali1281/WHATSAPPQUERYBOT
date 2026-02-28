@@ -38,7 +38,7 @@ async function processLocalRates(childQuery, sock, quoteData) {
         JOIN child_queries cq ON vr.child_id = cq.id
         WHERE cq.hotel_name = ? 
         AND vq.full_json IS NOT NULL
-        AND vq.created_at >= datetime('now', '-10 days')
+        AND vq.created_at >= datetime('now', '-14 days')
         ORDER BY vq.id DESC LIMIT 50
     `;
 
