@@ -2081,27 +2081,20 @@ try {
                 const sanitizedCandidates = await sanitizeHotelNames(potentialLines);
                 let newHotel = sanitizedCandidates.find(h => h && h !== 'DROP_ME');
                 
-                // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
-                // 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
+// 🛡️ THE RAW RESCUE: Improved with Price & Room Filter
                 if (!newHotel) {
                     // 🛡️ THE FIX: Strip out conversational words FIRST!
-                    // If we don't do this first, isJunkLine() sees "offer" and kills it instantly.
                     let firstLine = potentialLines[0].replace(/can offer|we have|available|offering|how about|we can give|offer/ig, '').trim();
                     
-                    // Check if the cleaned line looks like a price or room type
                     const isPriceLine = /\d+\/\d+/.test(firstLine) || /@\s*\d+/.test(firstLine) || /^\d+$/.test(firstLine.replace(/[^\d]/g, ''));
                     const isRoomCode = /dbl|trp|quad|sgl|ro|bb|hb|fb/i.test(firstLine) && /\d+/.test(firstLine);
+                    const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b|recheck|before|final|list|check|please|kindly|wait|let me|checking|dear|iftar|sahour|suhoor|sohour|breakfast|lunch|dinner|meal|inclusive|inc\b|with|without|only/i.test(firstLine);                    
                     
-                    // 🛡️ Heavily expanded junk word list
-// 🛡️ THE FIX: Added Ramadan & Meal terms to block them from becoming fake hotels
-                const isVendorJunk = /booked|sold|out|stop|sale|unavailable|w\.e|weekend|extra|ex\b|recheck|before|final|list|check|please|kindly|wait|let me|checking|dear|iftar|sahour|suhoor|sohour|breakfast|lunch|dinner|meal|inclusive|inc\b|with|without|only/i.test(firstLine);                    
-                    // Now test the CLEANED name (which will just be "miramar")
                     if (firstLine.length >= 3 && !isJunkLine(firstLine) && !isVendorJunk && !isPriceLine && !isRoomCode && firstLine.split(/\s+/).length <= 5) {
                         newHotel = firstLine; 
                         console.log(`⛑️ Vendor Hotel Rescued (Raw Text): "${newHotel}"`);
                     } else {
                         console.log(`🚫 Rescue Skipped: Line "${firstLine}" looks like a price or room code (or junk).`);
-                        // Fallback to the hotel name we originally asked for
                         newHotel = context.requested_hotel;
                     }
                 }
@@ -2109,8 +2102,13 @@ try {
                 if (newHotel && newHotel.toLowerCase() !== actualHotel.toLowerCase()) {
                     console.log(`🔄 Hotel Override Detected: "${actualHotel}" -> "${newHotel}"`);
                     actualHotel = newHotel;
+
+                    // 🛡️ NEW FIX: Permanently update the database for the Local Rate Engine
+                    const { updateChildHotelName } = require('./database');
+                    updateChildHotelName(context.child_id, actualHotel);
+                    console.log(`💾 DB: Updated Child Query ${context.child_id} hotel name to ${actualHotel}`);
                 }
-            } // <-- THIS BRACKET WAS LIKELY MISSING OR MISPLACED
+            } // <-- THIS BRACKET CLOSES `if (potentialLines.length > 0)`
 
             // 🛡️ SMART VIEW DETECTION
             let detectedView = extractView(rawText); 
@@ -2620,6 +2618,139 @@ app.get('/archive', async (req, res) => {
     } catch (err) {
         console.error("Archive Route Error:", err);
         res.status(500).send("Error loading archive: " + err.message);
+    }
+});
+
+// ==========================================
+// 📊 LOCAL RATE ENGINE: LIVE DATA VIEW
+// ==========================================
+app.get('/local-rates', (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+
+        const rawQuotes = db.prepare(`
+            SELECT 
+                q.id,
+                q.vendor_hotel_name,
+                q.quoted_price,
+                q.raw_reply_text,
+                q.full_json,
+                q.created_at,
+                vr.vendor_group_id,
+                g.name AS vendor_name,
+                cq.check_in,
+                cq.check_out,
+                cq.room_type AS requested_room,
+                pq.original_text AS client_original_text
+            FROM vendor_quotes q
+            JOIN vendor_requests vr ON q.request_id = vr.id
+            JOIN child_queries cq ON vr.child_id = cq.id
+            LEFT JOIN parent_queries pq ON cq.parent_id = pq.id 
+            LEFT JOIN groups g ON vr.vendor_group_id = g.group_id
+            ORDER BY q.created_at DESC
+            LIMIT 200
+        `).all();
+
+        const displayRates = rawQuotes.map(row => {
+            let parsed = {};
+            try { parsed = JSON.parse(row.full_json); } catch (e) {}
+
+            // 🛡️ 1. BULLETPROOF ROOM TYPE
+            let baseType = '';
+            if (parsed.raw_vendor_data?.offered_room_type && parsed.raw_vendor_data.offered_room_type.trim() !== '') {
+                baseType = parsed.raw_vendor_data.offered_room_type;
+            } else if (parsed.raw_vendor_data?.quoted_base_capacity) {
+                const capMap = {1: 'SINGLE', 2: 'DOUBLE', 3: 'TRIPLE', 4: 'QUAD', 5: 'QUINT'};
+                baseType = capMap[parsed.raw_vendor_data.quoted_base_capacity] || `ROOM (${parsed.raw_vendor_data.quoted_base_capacity} PAX)`;
+            } else {
+                baseType = parsed.room_type || row.requested_room || 'ROOM';
+            }
+
+            // 🛡️ 2. BULLETPROOF AVERAGE RATE
+            let averageRate = 0;
+            if (Array.isArray(parsed.breakdown) && parsed.breakdown.length > 0) {
+                const totalBase = parsed.breakdown.reduce((sum, day) => sum + (day.base_rate || day.net_daily || day.price || 0), 0);
+                averageRate = Math.round(totalBase / parsed.breakdown.length);
+            } else {
+                averageRate = parsed.total_price || row.quoted_price || 0;
+            }
+
+            // 🛡️ 3. BULLETPROOF EXTRA BED
+            let extraBedVal = 0;
+            if (Array.isArray(parsed.raw_vendor_data?.split_rates) && parsed.raw_vendor_data.split_rates.length > 0) {
+                const ebs = parsed.raw_vendor_data.split_rates.map(s => s.extra_bed_rate || 0);
+                extraBedVal = Math.max(...ebs);
+            }
+            if (extraBedVal === 0) extraBedVal = parsed.raw_vendor_data?.extra_bed_price || 0;
+            if (extraBedVal === 0) extraBedVal = parsed.extra_bed_price || 0;
+
+            // 🛡️ 4. CLEAN HTML SPLITS (No complex grouping, just the raw splits)
+            let displayRateHTML = "";
+            if (Array.isArray(parsed.raw_vendor_data?.split_rates) && parsed.raw_vendor_data.split_rates.length > 1) {
+                displayRateHTML = `
+                    <div class="avg-rate">~${averageRate} SAR <span class="avg-label">(Avg)</span></div>
+                    <details class="rate-details">
+                        <summary>View Date Breakdown</summary>
+                        <div class="rate-breakdown-content">
+                `;
+                parsed.raw_vendor_data.split_rates.forEach(s => {
+                    let lbl = s.type === 'WEEKDAY' ? 'WD' : s.type === 'WEEKEND' ? 'WE' : (s.type || 'RATE');
+                    let dts = s.dates ? s.dates.replace(/202[0-9]-/g, '') : '';
+                    displayRateHTML += `<div class="rate-line"><span style="color:#64748b; font-size:10px;">${dts}</span> <b>${lbl}:</b> <strong>${s.rate} SAR</strong></div>`;
+                });
+                displayRateHTML += `</div></details>`;
+            } else {
+                const singleRate = parsed.raw_vendor_data?.split_rates?.[0]?.rate || averageRate;
+                displayRateHTML = `<div class="avg-rate">${singleRate} SAR</div>`;
+            }
+
+            // 🛡️ 5. MEALS & VIEWS
+            let mealText = parsed.applied_meal || parsed.raw_vendor_data?.base_meal_plan || 'RO';
+            const mealSupp = parsed.meal_supplement || parsed.raw_vendor_data?.meal_price_per_pax || 0;
+            if (mealSupp > 0) mealText += ` <span style="color:#e74c3c; font-size:10px; font-weight:bold;">(+${mealSupp})</span>`;
+
+            let viewText = parsed.applied_view || 'Standard';
+            let viewSupp = 0;
+            const viewObj = parsed.raw_vendor_data?.view_surcharges;
+            if (viewObj) {
+               if (viewText.includes('HARAM') && viewObj.haram > 0) viewSupp = viewObj.haram;
+               else if (viewText.includes('KAABA') && viewObj.kaaba > 0) viewSupp = viewObj.kaaba;
+               else if (viewText.includes('CITY') && viewObj.city > 0) viewSupp = viewObj.city;
+            }
+            if (viewSupp === 0 && parsed.view_supplement > 0) viewSupp = parsed.view_supplement;
+            if (viewSupp > 0) viewText += ` <span style="color:#e74c3c; font-size:10px; font-weight:bold;">(+${viewSupp})</span>`;
+
+            const dateObj = new Date(row.created_at);
+            const formattedDate = `${dateObj.toLocaleDateString('en-GB')}<br><span style="color:#94a3b8; font-size:10px;">${dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>`;
+
+            return {
+                rawTimestamp: dateObj.getTime(),
+                rawPrice: averageRate,
+                rawCheckIn: row.check_in || '',    
+                rawCheckOut: row.check_out || '',  
+                submissionDateHTML: formattedDate,
+                stayDates: `${row.check_in || '?'} to ${row.check_out || '?'}`,
+                hotel: row.vendor_hotel_name || parsed.hotel || 'Unknown',
+                baseType: baseType.toUpperCase(),
+                displayRateHTML: displayRateHTML, 
+                extraBed: extraBedVal,
+                meal: mealText,
+                view: viewText,
+                descriptor: parsed.room_descriptor || '-',
+                vendor: row.vendor_name || row.vendor_group_id || 'Unknown Vendor',
+                clientText: row.client_original_text || 'No client text available',
+                rawText: row.raw_reply_text || 'No text recorded',
+                rawJson: row.full_json || '{}',
+                // 🛡️ NEW: URL-encoded JSON for the frontend Stitcher Engine
+                encodedJson: encodeURIComponent(row.full_json || '{}')
+            };
+        });
+
+        res.render('local_rates', { rates: displayRates });
+    } catch (err) {
+        console.error("Local Rates Route Error:", err);
+        res.status(500).send("Error loading local rates.");
     }
 });
 

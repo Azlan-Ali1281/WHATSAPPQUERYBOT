@@ -416,6 +416,14 @@ function getVendorsForHotelDB(hotelName) {
     return Array.from(defaultVendors);
 }
 
+function updateChildHotelName(childId, newHotelName) {
+// 🛡️ THE FIX: Removed getDatabase(). We just use the global 'db' variable directly.
+    try {
+        db.prepare("UPDATE child_queries SET hotel_name = ? WHERE id = ?").run(newHotelName, childId);
+    } catch (err) {
+        console.error("❌ Failed to update child hotel name:", err);
+    }
+}
 
 // 2. Set/Update Limits for a specific group
 function setClientLimits(groupId, limits) {
@@ -640,6 +648,7 @@ module.exports = {
     getGroupInfo,          // 👈 MAKE SURE THIS IS HERE
     getGroupIdByClientCode, // 👈 AND THIS
     getOwnerGroupsDB,
+    updateChildHotelName,
     getVendorsForHotelDB,
     upsertLimitTier,     // 👈 NEW
     assignTierToGroup,   // 👈 NEW

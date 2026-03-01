@@ -1,0 +1,446 @@
+<%- include('partials/header') %>
+
+<style>
+    .local-rates-wrapper {
+        --primary: #2563eb;
+        --card-bg: #ffffff;
+        --text-main: #1e293b;
+        --text-muted: #64748b;
+        --border-color: #e2e8f0;
+        --table-header: #f8fafc;
+        font-family: 'Inter', Arial, sans-serif;
+        padding: 10px 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .local-rates-wrapper .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .local-rates-wrapper h1 { margin: 0; font-size: 22px; font-weight: 700; color: #0f172a; }
+    
+    .controls-bar {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+        margin-bottom: 20px; background: var(--card-bg); padding: 16px;
+        border-radius: 12px; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .controls-bar .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .controls-bar .control-group.wide { grid-column: span 2; }
+    .controls-bar label { font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .controls-bar input, .controls-bar select {
+        width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px;
+        font-family: inherit; font-size: 13px; color: var(--text-main); outline: none; background: #f8fafc; box-sizing: border-box;
+    }
+    .controls-bar input:focus, .controls-bar select:focus { border-color: var(--primary); background: #ffffff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+
+    /* --- 💡 UPGRADED STITCHER UI --- */
+    #stitchedResultBox {
+        display: none;
+        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+        border: 1px solid #fcd34d;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 15px rgba(245, 158, 11, 0.15);
+    }
+    .stitch-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #fde68a; padding-bottom: 12px; margin-bottom: 16px; }
+    .stitch-title { font-size: 16px; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 8px;}
+    .stitch-total { font-size: 20px; font-weight: 800; color: #92400e; }
+    .stitch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+    
+    .stitch-night { background: #ffffff; border: 1px solid #fde68a; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);}
+    .stitch-header-row { display: flex; justify-content: space-between; align-items: center; }
+    .stitch-date { font-size: 13px; font-weight: 800; color: #d97706; }
+    .stitch-vendor { font-size: 10px; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 3px 6px; border-radius: 4px; }
+    
+    .stitch-main-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .stitch-rate { font-size: 18px; font-weight: 800; color: #1e293b; }
+    .stitch-room { font-size: 12px; font-weight: 800; color: #475569; }
+    
+    .stitch-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;}
+    .stitch-badge { font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; border: 1px solid #e2e8f0; background: #f8fafc; color: #475569;}
+    .stitch-badge.eb { border-color: #fecaca; color: #991b1b; background: #fee2e2; }
+
+    /* Table Styles */
+    .local-rates-wrapper .table-container { background: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); overflow: hidden; }
+    .local-rates-wrapper table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .local-rates-wrapper th, .local-rates-wrapper td { padding: 16px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; }
+    .local-rates-wrapper th { background-color: var(--table-header); color: var(--text-muted); text-transform: uppercase; font-size: 11px; font-weight: 700; border-bottom: 2px solid var(--border-color); }
+    .local-rates-wrapper tr.data-row:hover td { background-color: #f8fafc; }
+
+    .hotel-name { font-weight: 800; color: #0f172a; font-size: 15px; margin-bottom: 4px; }
+    .stay-dates { font-weight: 700; color: var(--primary); font-size: 12px; background: #eff6ff; display: inline-block; padding: 4px 8px; border-radius: 4px; border: 1px solid #bfdbfe; margin-bottom: 4px;}
+    .descriptor { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+    .room-type { color: #475569; font-size: 13px; font-weight: 800; margin-bottom: 6px; display: inline-block;}
+    .vendor-name { font-weight: 700; color: #334155; font-size: 13px; margin-bottom: 4px;}
+    .date-col { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
+    .inclusions-box { margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap; }
+    .inc-badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: #fff;}
+    .badge { padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 800; display: inline-block; margin-left: 6px;}
+    .badge.danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca;}
+    .badge.success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0;}
+
+    .chat-column { width: 35%; min-width: 280px; }
+    .chat-label { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; }
+    .chat-bubble { background: #f1f5f9; border-left: 3px solid #3b82f6; padding: 6px 10px; border-radius: 0 6px 6px 0; font-size: 11px; color: #334155; margin-bottom: 8px; font-style: italic; max-height: 60px; overflow-y: auto; line-height: 1.4; }
+    .chat-bubble.vendor { border-left-color: #10b981; background: #ecfdf5; }
+    
+    .avg-rate { font-size: 15px; font-weight: 800; color: #0f172a; }
+    .avg-label { font-size: 10px; font-weight: 600; color: #64748b; }
+    .rate-details { border: none; background: transparent; margin-top: 4px; }
+    .rate-details summary { padding: 0; color: var(--primary); text-decoration: underline; background: transparent; font-size: 11px; font-weight: 700; cursor: pointer;}
+    .rate-breakdown-content { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; margin-top: 6px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);}
+    .rate-line { display: flex; justify-content: space-between; font-size: 11px; color: #1e293b; padding: 3px 0; font-weight: 500;}
+    
+    details.ai-debug { background: var(--table-header); border: 1px solid var(--border-color); border-radius: 6px; padding: 0; }
+    details.ai-debug summary { font-weight: 700; font-size: 10px; color: #6366f1; cursor: pointer; padding: 6px 10px; outline: none;}
+    details.ai-debug pre { background: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 0 0 6px 6px; font-size: 10px; overflow-x: auto; margin: 0; max-height: 150px;}
+
+    @media (max-width: 900px) {
+        .controls-bar .control-group.wide { grid-column: span 1; }
+        .table-container { border: none; box-shadow: none; background: transparent; }
+        table, thead, tbody, th, td, tr { display: block; width: 100%; }
+        thead tr { display: none; }
+        tr.data-row { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 16px; padding: 5px; }
+        td { border-bottom: 1px solid #f1f5f9; padding: 12px 10px; position: relative; }
+        td::before { content: attr(data-label); display: block; font-weight: 800; font-size: 10px; text-transform: uppercase; color: var(--primary); margin-bottom: 8px; }
+        .chat-column { width: 100%; min-width: unset; }
+    }
+</style>
+
+<div class="local-rates-wrapper">
+    <div class="page-header">
+        <h1>📊 Live Rate Engine Tracker</h1>
+    </div>
+
+    <div class="controls-bar">
+        <div class="control-group">
+            <label for="filterHotel">🏨 Hotel Name</label>
+            <input type="text" id="filterHotel" placeholder="e.g. Movenpick">
+        </div>
+        <div class="control-group">
+            <label for="filterCheckIn">📅 Check-In</label>
+            <input type="date" id="filterCheckIn">
+        </div>
+        <div class="control-group">
+            <label for="filterCheckOut">📅 Check-Out</label>
+            <input type="date" id="filterCheckOut">
+        </div>
+        <div class="control-group">
+            <label for="vendorFilter">🏢 Vendor</label>
+            <select id="vendorFilter">
+                <option value="all">All Vendors</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="sortSelect">↕️ Sort By</label>
+            <select id="sortSelect">
+                <option value="newest">Time: Newest First</option>
+                <option value="oldest">Time: Oldest First</option>
+                <option value="priceDesc">Price: High to Low</option>
+                <option value="priceAsc">Price: Low to High</option>
+            </select>
+        </div>
+        <div class="control-group wide">
+            <label for="searchInput">🔍 Keyword Search</label>
+            <input type="text" id="searchInput" placeholder="Search client text, room types...">
+        </div>
+    </div>
+
+    <div id="stitchedResultBox"></div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th width="25%">Hotel & Stay</th>
+                    <th width="25%">Rate & Inclusions</th>
+                    <th width="15%">Vendor Info</th>
+                    <th width="35%">Context Flow</th>
+                </tr>
+            </thead>
+            <tbody id="rateTableBody">
+                <% if (rates.length === 0) { %>
+                    <tr id="emptyState"><td colspan="4" style="text-align: center; padding: 40px; color: #64748b;">No vendor rates logged yet.</td></tr>
+                <% } else { %>
+                    <% rates.forEach(rate => { %>
+                        <tr class="data-row" 
+                            data-time="<%= rate.rawTimestamp %>" 
+                            data-price="<%= rate.rawPrice %>" 
+                            data-hotel="<%= rate.hotel %>" 
+                            data-vendor="<%= rate.vendor %>"
+                            data-checkin="<%= rate.rawCheckIn %>"
+                            data-checkout="<%= rate.rawCheckOut %>"
+                            data-rawjson="<%= rate.encodedJson %>">
+                            
+                            <td data-label="Booking Details">
+                                <div class="hotel-name"><%= rate.hotel %></div>
+                                <div class="stay-dates"><%= rate.stayDates %></div>
+                                <% if (rate.descriptor !== '-') { %>
+                                    <div class="descriptor">🏷️ <%= rate.descriptor %></div>
+                                <% } %>
+                            </td>
+                            
+                            <td data-label="Rate & Inclusions">
+                                <div>
+                                    <span class="room-type"><%= rate.baseType %></span>
+                                    <% if (rate.extraBed > 0) { %>
+                                        <span class="badge danger">+<%= rate.extraBed %> Ext. Bed</span>
+                                    <% } else { %>
+                                        <span class="badge success">0 Ext. Bed</span>
+                                    <% } %>
+                                </div>
+                                <%- rate.displayRateHTML %> 
+                                <div class="inclusions-box">
+                                    <span class="inc-badge">🍽️ <%- rate.meal %></span>
+                                    <span class="inc-badge">🪟 <%- rate.view %></span>
+                                </div>
+                            </td>
+
+                            <td data-label="Vendor Information">
+                                <div class="vendor-name">🏢 <%= rate.vendor %></div>
+                                <div class="date-col"><%- rate.submissionDateHTML %></div>
+                            </td>
+                            
+                            <td class="chat-column" data-label="Conversation Flow">
+                                <div class="chat-label">👤 Client Asked:</div>
+                                <div class="chat-bubble"><%= rate.clientText %></div>
+                                <div class="chat-label">🏢 Vendor Quoted:</div>
+                                <div class="chat-bubble vendor"><%= rate.rawText %></div>
+                                <details class="ai-debug">
+                                    <summary>⚙️ View AI JSON Output</summary>
+                                    <pre><%= JSON.stringify(JSON.parse(rate.rawJson), null, 2) %></pre>
+                                </details>
+                            </td>
+                        </tr>
+                    <% }) %>
+                <% } %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<%- include('partials/footer') %>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const searchInput = document.getElementById('searchInput');
+        const filterHotel = document.getElementById('filterHotel');
+        const filterCheckIn = document.getElementById('filterCheckIn');
+        const filterCheckOut = document.getElementById('filterCheckOut');
+        const sortSelect = document.getElementById('sortSelect');
+        const vendorFilter = document.getElementById('vendorFilter');
+        const tbody = document.getElementById('rateTableBody');
+        const stitchedBox = document.getElementById('stitchedResultBox');
+        const rows = Array.from(tbody.querySelectorAll('.data-row'));
+        
+        if (rows.length === 0) return;
+
+        // Auto-Populate Vendors
+        const vendors = new Set();
+        rows.forEach(row => vendors.add(row.getAttribute('data-vendor')));
+        Array.from(vendors).sort().forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v; opt.textContent = v;
+            vendorFilter.appendChild(opt);
+        });
+
+        function getDatesBetween(startStr, endStr) {
+            let dates = [];
+            let curr = new Date(startStr);
+            const end = new Date(endStr);
+            while (curr < end) {
+                dates.push(curr.toISOString().split('T')[0]);
+                curr.setDate(curr.getDate() + 1);
+            }
+            return dates;
+        }
+
+        // 🧠 UPGRADED LOCAL STITCHER ENGINE
+        function runStitcher(hotel, start, end) {
+            const neededNights = getDatesBetween(start, end);
+            const stitchedPlan = [];
+            let totalCost = 0;
+            let canStitch = true;
+
+            neededNights.forEach(night => {
+                let bestForNight = null;
+
+                rows.forEach(row => {
+                    if (!row.getAttribute('data-hotel').toLowerCase().includes(hotel)) return;
+
+                    const vendor = row.getAttribute('data-vendor');
+                    let parsed = {};
+                    try { parsed = JSON.parse(decodeURIComponent(row.getAttribute('data-rawjson'))); } catch(e){}
+
+                    // 1. Extract Deep Context for this Vendor's Quote
+                    let baseType = '';
+                    if (parsed.raw_vendor_data?.offered_room_type) baseType = parsed.raw_vendor_data.offered_room_type;
+                    else if (parsed.raw_vendor_data?.quoted_base_capacity) {
+                        const capMap = {1: 'SINGLE', 2: 'DOUBLE', 3: 'TRIPLE', 4: 'QUAD', 5: 'QUINT'};
+                        baseType = capMap[parsed.raw_vendor_data.quoted_base_capacity] || 'ROOM';
+                    } else { baseType = parsed.room_type || 'ROOM'; }
+
+                    let meal = parsed.applied_meal || parsed.raw_vendor_data?.base_meal_plan || 'RO';
+                    const mealSupp = parsed.meal_supplement || parsed.raw_vendor_data?.meal_price_per_pax || 0;
+                    if(mealSupp > 0) meal += ` (+${mealSupp})`;
+
+                    let view = parsed.applied_view || 'Standard';
+                    let viewSupp = 0;
+                    const viewObj = parsed.raw_vendor_data?.view_surcharges;
+                    if(viewObj) {
+                       if(view.includes('HARAM') && viewObj.haram > 0) viewSupp = viewObj.haram;
+                       else if(view.includes('KAABA') && viewObj.kaaba > 0) viewSupp = viewObj.kaaba;
+                       else if(view.includes('CITY') && viewObj.city > 0) viewSupp = viewObj.city;
+                    }
+                    if(viewSupp === 0 && parsed.view_supplement > 0) viewSupp = parsed.view_supplement;
+                    if(viewSupp > 0) view += ` (+${viewSupp})`;
+
+                    const rStart = row.getAttribute('data-checkin');
+                    const rEnd = row.getAttribute('data-checkout');
+                    const isWithinFallback = (night >= rStart && night < rEnd);
+                    const splits = parsed.raw_vendor_data?.split_rates || [];
+                    
+                    let nightRate = null;
+                    let extraBed = 0;
+
+                    // 2. Find exact price for this night
+                    if (splits.length > 0) {
+                        splits.forEach(s => {
+                            let match = false;
+                            if (s.dates && s.dates.includes(' to ')) {
+                                const [sS, sE] = s.dates.split(' to ');
+                                if (night >= sS && night < sE) match = true;
+                            } else if (isWithinFallback) {
+                                match = true;
+                            }
+
+                            if (match) {
+                                nightRate = s.rate;
+                                extraBed = s.extra_bed_rate || parsed.raw_vendor_data?.extra_bed_price || parsed.extra_bed_price || 0;
+                            }
+                        });
+                    } else if (isWithinFallback) {
+                        nightRate = parseFloat(row.getAttribute('data-price'));
+                        extraBed = parsed.raw_vendor_data?.extra_bed_price || parsed.extra_bed_price || 0;
+                    }
+
+                    // 3. Save if it's the cheapest so far
+                    if (nightRate !== null) {
+                        if (!bestForNight || nightRate < bestForNight.rate) {
+                            bestForNight = { 
+                                rate: nightRate, vendor: vendor, roomType: baseType.toUpperCase(), 
+                                meal: meal, view: view, extraBed: extraBed 
+                            };
+                        }
+                    }
+                });
+
+                if (bestForNight) {
+                    stitchedPlan.push({ date: night, ...bestForNight });
+                    totalCost += bestForNight.rate;
+                } else {
+                    canStitch = false;
+                }
+            });
+
+            if (!canStitch || stitchedPlan.length === 0) {
+                stitchedBox.style.display = 'none';
+                return;
+            }
+
+            // 4. Render Beautiful Stitched UI
+            let avg = Math.round(totalCost / stitchedPlan.length);
+            let html = `
+                <div class="stitch-header">
+                    <div class="stitch-title">💡 AI Stitched Recommendation</div>
+                    <div class="stitch-total">~${avg} SAR / night</div>
+                </div>
+                <div class="stitch-grid">
+            `;
+
+            stitchedPlan.forEach(p => {
+                html += `
+                    <div class="stitch-night">
+                        <div class="stitch-header-row">
+                            <span class="stitch-date">${p.date}</span>
+                            <span class="stitch-vendor">${p.vendor}</span>
+                        </div>
+                        <div class="stitch-main-row">
+                            <span class="stitch-rate">${p.rate} SAR</span>
+                            <span class="stitch-room">${p.roomType}</span>
+                        </div>
+                        <div class="stitch-badges">
+                            <span class="stitch-badge">🍽️ ${p.meal}</span>
+                            <span class="stitch-badge">🪟 ${p.view}</span>
+                            <span class="stitch-badge ${p.extraBed > 0 ? 'eb' : ''}">🛏️ ${p.extraBed > 0 ? '+'+p.extraBed : '0'} EB</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+            stitchedBox.innerHTML = html;
+            stitchedBox.style.display = 'block';
+        }
+
+        function updateTable() {
+            const keyword = searchInput.value.toLowerCase();
+            const hotelTerm = filterHotel.value.toLowerCase();
+            const checkInDate = filterCheckIn.value;
+            const checkOutDate = filterCheckOut.value;
+            const vendorTerm = vendorFilter.value;
+            const sortMode = sortSelect.value;
+
+            // Trigger Advanced Stitcher if dates are selected
+            if (hotelTerm.length > 2 && checkInDate && checkOutDate) {
+                runStitcher(hotelTerm, checkInDate, checkOutDate);
+            } else {
+                stitchedBox.style.display = 'none';
+            }
+
+            let filteredRows = rows.filter(row => {
+                const textContent = row.innerText.toLowerCase();
+                const rowHotel = row.getAttribute('data-hotel').toLowerCase();
+                const rowVendor = row.getAttribute('data-vendor');
+                const rowCheckIn = row.getAttribute('data-checkin');
+                const rowCheckOut = row.getAttribute('data-checkout');
+
+                if (keyword && !textContent.includes(keyword)) return false;
+                if (hotelTerm && !rowHotel.includes(hotelTerm)) return false;
+                if (vendorTerm !== 'all' && rowVendor !== vendorTerm) return false;
+                if (checkInDate && rowCheckIn !== checkInDate) return false;
+                if (checkOutDate && rowCheckOut !== checkOutDate) return false;
+
+                return true;
+            });
+
+            filteredRows.sort((a, b) => {
+                const timeA = parseInt(a.getAttribute('data-time'));
+                const timeB = parseInt(b.getAttribute('data-time'));
+                const priceA = parseFloat(a.getAttribute('data-price'));
+                const priceB = parseFloat(b.getAttribute('data-price'));
+
+                if (sortMode === 'newest') return timeB - timeA;
+                if (sortMode === 'oldest') return timeA - timeB;
+                if (sortMode === 'priceDesc') return priceB - priceA;
+                if (sortMode === 'priceAsc') return priceA - priceB;
+                return 0;
+            });
+
+            rows.forEach(row => row.style.display = 'none'); 
+            if (filteredRows.length > 0) {
+                filteredRows.forEach(row => {
+                    row.style.display = '';
+                    tbody.appendChild(row); 
+                });
+            }
+        }
+
+        searchInput.addEventListener('input', updateTable);
+        filterHotel.addEventListener('input', updateTable);
+        filterCheckIn.addEventListener('change', updateTable);
+        filterCheckOut.addEventListener('change', updateTable);
+        sortSelect.addEventListener('change', updateTable);
+        vendorFilter.addEventListener('change', updateTable);
+    });
+</script>
