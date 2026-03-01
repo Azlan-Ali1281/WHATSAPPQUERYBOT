@@ -2629,7 +2629,7 @@ app.get('/local-rates', (req, res) => {
         const { getDatabase } = require('./database');
         const db = getDatabase();
 
-        const rawQuotes = db.prepare(`
+const rawQuotes = db.prepare(`
             SELECT 
                 q.id,
                 q.vendor_hotel_name,
@@ -2644,8 +2644,8 @@ app.get('/local-rates', (req, res) => {
                 cq.room_type AS requested_room,
                 pq.original_text AS client_original_text
             FROM vendor_quotes q
-            JOIN vendor_requests vr ON q.request_id = vr.id
-            JOIN child_queries cq ON vr.child_id = cq.id
+            LEFT JOIN vendor_requests vr ON q.request_id = vr.id     -- 🛡️ FIX: Changed to LEFT JOIN
+            LEFT JOIN child_queries cq ON vr.child_id = cq.id        -- 🛡️ FIX: Changed to LEFT JOIN
             LEFT JOIN parent_queries pq ON cq.parent_id = pq.id 
             LEFT JOIN groups g ON vr.vendor_group_id = g.group_id
             ORDER BY q.created_at DESC
