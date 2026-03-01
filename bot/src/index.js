@@ -2649,7 +2649,7 @@ app.get('/local-rates', (req, res) => {
             LEFT JOIN parent_queries pq ON cq.parent_id = pq.id 
             LEFT JOIN groups g ON vr.vendor_group_id = g.group_id
             ORDER BY q.created_at DESC
-            LIMIT 200
+            LIMIT 5000
         `).all();
 
         const displayRates = rawQuotes.map(row => {
