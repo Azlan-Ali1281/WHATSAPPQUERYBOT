@@ -2754,6 +2754,28 @@ const rawQuotes = db.prepare(`
 });
 
 // ==========================================
+// 🛠️ DATABASE DIAGNOSTICS
+// ==========================================
+app.get('/db-stats', (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+
+        const stats = {
+            parent_queries: db.prepare("SELECT COUNT(*) as count FROM parent_queries").get().count,
+            child_queries: db.prepare("SELECT COUNT(*) as count FROM child_queries").get().count,
+            vendor_requests: db.prepare("SELECT COUNT(*) as count FROM vendor_requests").get().count,
+            vendor_quotes: db.prepare("SELECT COUNT(*) as count FROM vendor_quotes").get().count,
+            groups: db.prepare("SELECT COUNT(*) as count FROM groups").get().count,
+        };
+
+        res.json(stats);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==========================================
 // 🚀 SERVER START
 // ==========================================
 const PORT = process.env.PORT || 3000;
