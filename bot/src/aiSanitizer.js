@@ -1,43 +1,23 @@
-// src/aiSanitizer.js
 require('dotenv').config();
 const OpenAI = require('openai');
+const { getDatabase } = require('./database'); // 🛡️ Import DB to fetch the dynamic registry
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// 📋 THE GOLDEN LIST (Matches your GroupConfig Keys exactly)
-const OFFICIAL_REGISTRY = [
-  // 🕌 MADINAH
-  "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower","Grand Plaza Almadina",
-  "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Eiman Intercontinental", "Grand Plaza Badr Al Maqam",
-  "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", "Plaza Inn Ohud","Maysan Altaqwa",
-  "Leader Al Muna Kareem", "Odst Al Madinah", "Artal International", "Zowar International", 
-  "Taiba Front", "Al Aqeeq", "Frontel Al Harithia", "Dallah Taibah", 
-  "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Sky View","Province Al Sham", "Taif Al Nebras" ,
-  "Gulnar Taiba", "Emaar Al Manar","Bir Al Eiman","Tara Al Hijra","Rama Al Madinah","Miramar","Arkan Almanar","Maysan Rehab Elmysk",
-  
-  // 🕋 MAKKAH (Clock Tower)
-  "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", 
-  "Raffles Makkah Palace", "Pullman Zamzam Makkah", "Movenpick Hajar Tower", 
-  "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers","Time Ruba","Shaza Regency","Land Prenium","Taiba Madinah",
-
-  // 🕋 MAKKAH (Haram/Jabal Omar)
-  "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", 
-  "Conrad Makkah", "Jabal Omar Marriott", "Saif Al Majd","Address Jabal Omar", 
-  "Sheraton Makkah Jabal Al Kaaba", "DoubleTree by Hilton Makkah", 
-  "Le Meridien Makkah", "Waqf Uthman", "Safwat Al Medina","Courtyard By Marriott",
-  "Courtyard By Marriot",
-  "Courtyard Makkah",
-  "Courtyard Madinah","Mira Sud","majd al muhajireen","Maden Madinah","Zila Al Nazula","Anjum Makkah",
-
-  // 🚌 MAKKAH (Aziziyah/Shuttle)
-  "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", "Holiday Inn","Worth Peninsula",
-  "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah", "Triple One" ,"Four Points by Sheraton Makkah", "Emaar Grand Makkah", "Emaar Elite Makkah"
-];
-
 async function sanitizeHotelNames(rawHotels) {
   if (!rawHotels || rawHotels.length === 0) return [];
+
+  // 🛡️ FETCH DYNAMIC REGISTRY FROM DATABASE
+  const db = getDatabase();
+  let OFFICIAL_REGISTRY = [];
+  try {
+      const rows = db.prepare("SELECT name FROM hotel_registry ORDER BY name ASC").all();
+      OFFICIAL_REGISTRY = rows.map(r => r.name);
+  } catch (e) {
+      console.error("Failed to fetch registry for AI:", e);
+  }
 
   const systemPrompt = `
     You are the Guardian of the Hotel Database for Makkah and Madinah.
@@ -63,7 +43,7 @@ async function sanitizeHotelNames(rawHotels) {
       - "Makkah Hotel" and "Makkah Towers" are DIFFERENT. Respect the user's choice.
       - "Emaar Grand" vs "Emaar Elite" vs "Emaar Royal". Don't mix them.
       - "Saja Makkah" vs "Saja Madinah". Don't mix them.
-      = "Dar Al Taqwa" vs "Maysan Altaqwa" - Don't mix them.
+      - "Dar Al Taqwa" vs "Maysan Altaqwa" - Don't mix them.
 
     ### 3. 🛡️ SANITIZATION RULES
     - **Unknown Hotels:** If the hotel is VALID but NOT in the Official Registry (e.g. "Four Points"), just fix the spelling. DO NOT force it into the registry.
@@ -81,7 +61,7 @@ async function sanitizeHotelNames(rawHotels) {
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(rawHotels) }
       ],
-      temperature: 0.1, // Low temp for precision
+      temperature: 0.1,
     });
 
     const rawContent = response.choices[0].message.content.trim();
@@ -95,4 +75,4 @@ async function sanitizeHotelNames(rawHotels) {
   }
 }
 
-module.exports = { sanitizeHotelNames, OFFICIAL_REGISTRY };
+module.exports = { sanitizeHotelNames };

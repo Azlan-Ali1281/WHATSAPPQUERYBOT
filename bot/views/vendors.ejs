@@ -7,49 +7,54 @@
     .vendor-title { font-size: 18px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
     .vendor-code { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 6px; font-family: monospace; font-size: 13px; font-weight: 700; }
 
-    /* Hotel Tags */
+    /* Saved Hotel Tags */
     .hotel-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
     .hotel-tag { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; word-break: break-word; }
     .btn-remove { background: none; border: none; color: #60a5fa; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: color 0.2s; }
     .btn-remove:hover { color: #dc2626; }
     .tag-all { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
 
-    /* Form Layouts */
+    /* Form Layouts & Multi-Select Drafts */
     .mapping-actions { display: flex; flex-direction: column; gap: 12px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1; }
-    .add-hotel-form { display: flex; gap: 12px; align-items: center; width: 100%; }
     
-    .btn-add { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
-    .btn-add:hover { background: #059669; }
+    .draft-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .draft-tag { background: #e2e8f0; border: 1px solid #cbd5e1; color: #334155; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; animation: popIn 0.2s ease-out; }
+    .draft-remove { cursor: pointer; color: #94a3b8; font-weight: bold; }
+    .draft-remove:hover { color: #dc2626; }
+    @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+    .add-hotel-form { display: flex; gap: 12px; align-items: stretch; width: 100%; }
     
-    /* 🛡️ NEW: Catch-All Button */
-    .btn-catch-all { background: white; border: 1px solid #fecaca; color: #dc2626; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+    .btn-save { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; opacity: 0.5; pointer-events: none; }
+    .btn-save.active { opacity: 1; pointer-events: auto; }
+    .btn-save:hover { background: #059669; }
+    
+    .btn-catch-all { background: white; border: 1px solid #fecaca; color: #dc2626; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 8px;}
     .btn-catch-all:hover { background: #fef2f2; border-color: #ef4444; }
 
     /* Autocomplete */
-    .autocomplete-wrapper { position: relative; flex-grow: 1; display: flex; align-items: center; gap: 12px; width: 100%; }
-    .search-input { width: 100%; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; background: white; }
+    .autocomplete-wrapper { position: relative; flex-grow: 1; display: flex; flex-direction: column; width: 100%; }
+    .search-input { width: 100%; padding: 10px 16px 10px 38px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; background: white; }
+    .search-icon { position: absolute; left: 12px; top: 12px; color: #94a3b8; pointer-events: none; }
     .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
     
-    .autocomplete-list { position: absolute; top: calc(100% + 4px); left: 30px; right: 0; background: white; border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 0; list-style: none; max-height: 250px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); display: none; }
+    .autocomplete-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: white; border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 0; list-style: none; max-height: 250px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); display: none; }
     .autocomplete-list.active { display: block; }
     .autocomplete-item { padding: 12px 16px; font-size: 14px; color: var(--text-main); cursor: pointer; border-bottom: 1px solid #f1f5f9; }
     .autocomplete-item:hover { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 
-    /* 📱 MOBILE OPTIMIZATIONS */
     @media (max-width: 768px) {
         .vendor-card { padding: 16px; }
         .vendor-header { flex-direction: column; gap: 8px; }
-        .add-hotel-form { flex-direction: column; align-items: stretch; }
-        .autocomplete-wrapper { width: 100%; }
-        .autocomplete-list { left: 0; }
-        .btn-add { width: 100%; }
+        .add-hotel-form { flex-direction: column; }
+        .btn-save { width: 100%; }
     }
 </style>
 
 <div class="grid-container">
     <div style="margin-bottom: 24px;">
         <h1 style="margin: 0 0 4px 0; font-size: 24px;">Vendor Mapping</h1>
-        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Assign specific hotels or set fallback rules for your vendors.</p>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Assign specific hotels or set fallback rules for your vendors. You can add multiple hotels at once before saving.</p>
     </div>
 
     <% if (vendors.length === 0) { %>
@@ -60,7 +65,7 @@
     <% } %>
 
     <% vendors.forEach(vendor => { %>
-        <div class="vendor-card">
+        <div class="vendor-card" id="vendor-block-<%= vendor.group_id %>">
             <div class="vendor-header">
                 <div class="vendor-title">
                     <i data-lucide="building-2" style="width: 20px; color: #64748b;"></i> 
@@ -88,18 +93,25 @@
             </div>
 
             <div class="mapping-actions">
-                <form action="/vendor/<%= vendor.group_id %>/add-hotel" method="POST" class="add-hotel-form">
-                    <div class="autocomplete-wrapper">
-                        <i data-lucide="search" style="width: 18px; color: #94a3b8;"></i>
-                        <input type="text" name="hotel_name" class="search-input auto-input" placeholder="Search Database..." autocomplete="off" required>
+                <div class="draft-container" id="drafts-<%= vendor.group_id %>"></div>
+
+                <form action="/vendor/<%= vendor.group_id %>/add-hotel" method="POST" class="add-hotel-form" id="form-<%= vendor.group_id %>">
+                    <input type="hidden" name="hotel_names" id="hidden-input-<%= vendor.group_id %>" value="">
+
+                    <div class="autocomplete-wrapper" data-vendor-id="<%= vendor.group_id %>">
+                        <i data-lucide="search" class="search-icon" style="width: 16px;"></i>
+                        <input type="text" class="search-input auto-input" placeholder="Search Database to add multiple hotels..." autocomplete="off">
                         <ul class="autocomplete-list"></ul>
                     </div>
-                    <button type="submit" class="btn-add">Add Mapping</button>
+                    
+                    <button type="submit" class="btn-save" id="btn-save-<%= vendor.group_id %>">
+                        <i data-lucide="save" style="width: 16px;"></i> Save Mapping
+                    </button>
                 </form>
 
                 <% if (!vendor.handled_hotels.includes('ALL')) { %>
                     <form action="/vendor/<%= vendor.group_id %>/add-hotel" method="POST">
-                        <input type="hidden" name="hotel_name" value="ALL">
+                        <input type="hidden" name="hotel_names" value="ALL">
                         <button type="submit" class="btn-catch-all">
                             <i data-lucide="shield-alert" style="width: 16px;"></i> Set as Fallback Vendor (ALL)
                         </button>
@@ -118,28 +130,85 @@
     const MASTER_HOTEL_LIST = JSON.parse(dataBridge.getAttribute('data-hotels') || '[]');
 
     document.addEventListener("DOMContentLoaded", () => {
+        lucide.createIcons(); // Ensure Lucide icons render
+        
         const wrappers = document.querySelectorAll('.autocomplete-wrapper');
 
         wrappers.forEach(wrapper => {
+            const vendorId = wrapper.getAttribute('data-vendor-id');
             const input = wrapper.querySelector('.auto-input');
             const list = wrapper.querySelector('.autocomplete-list');
+            const draftContainer = document.getElementById(`drafts-${vendorId}`);
+            const hiddenInput = document.getElementById(`hidden-input-${vendorId}`);
+            const saveBtn = document.getElementById(`btn-save-${vendorId}`);
+            
+            // Array to hold the hotels we want to add
+            let draftedHotels = [];
 
+            // Function to update UI and Hidden Input
+            const updateDraftUI = () => {
+                draftContainer.innerHTML = '';
+                draftedHotels.forEach(hotel => {
+                    const tag = document.createElement('div');
+                    tag.className = 'draft-tag';
+                    tag.innerHTML = `
+                        ${hotel} 
+                        <span class="draft-remove" data-hotel="${hotel}">×</span>
+                    `;
+                    draftContainer.appendChild(tag);
+                });
+
+                // Update hidden input for form submission
+                hiddenInput.value = draftedHotels.join(',');
+
+                // Enable/Disable Save button
+                if (draftedHotels.length > 0) {
+                    saveBtn.classList.add('active');
+                } else {
+                    saveBtn.classList.remove('active');
+                }
+            };
+
+            // Remove a drafted hotel
+            draftContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('draft-remove')) {
+                    const h = e.target.getAttribute('data-hotel');
+                    draftedHotels = draftedHotels.filter(item => item !== h);
+                    updateDraftUI();
+                }
+            });
+
+            // The Autocomplete Renderer
             const renderList = (filterText = '') => {
                 list.innerHTML = '';
                 const query = filterText.toLowerCase().trim();
-                const filtered = MASTER_HOTEL_LIST.filter(hotel => hotel.toLowerCase().includes(query));
+                
+                // Filter hotels, but ignore ones that are already drafted
+                const filtered = MASTER_HOTEL_LIST.filter(hotel => 
+                    hotel.toLowerCase().includes(query) && !draftedHotels.includes(hotel)
+                );
 
                 if (filtered.length === 0) {
                     list.innerHTML = `<li class="autocomplete-item" style="color: #94a3b8; cursor: not-allowed;">No hotels found...</li>`;
                 } else {
-                    filtered.forEach(hotel => {
+                    // Limit to top 20 results so we don't freeze the DOM
+                    filtered.slice(0, 20).forEach(hotel => {
                         const li = document.createElement('li');
                         li.className = 'autocomplete-item';
                         li.textContent = hotel;
-                        li.addEventListener('mousedown', () => {
-                            input.value = hotel;
+                        
+                        // When a hotel is clicked in the list
+                        li.addEventListener('mousedown', (e) => {
+                            e.preventDefault(); // Prevent input blur
+                            if (!draftedHotels.includes(hotel)) {
+                                draftedHotels.push(hotel);
+                                updateDraftUI();
+                            }
+                            input.value = ''; // Clear search bar
                             list.classList.remove('active');
+                            input.focus(); // Keep focus so they can keep typing
                         });
+                        
                         list.appendChild(li);
                     });
                 }

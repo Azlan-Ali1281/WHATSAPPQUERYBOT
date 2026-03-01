@@ -74,8 +74,33 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // ======================================================
 const PRODUCTION_MVP_MODE = true
 
-// Add this near the top of index.js
 let globalSock = null;
+let globalQR = null;
+let globalBotStatus = 'INITIALIZING'; // Tracking state for the frontend
+const fs = require('fs'); // Required to delete the auth folder
+const path = require('path');
+
+// ==========================================
+// 🏨 AUTO-SETUP HOTEL REGISTRY DATABASE
+// ==========================================
+const dbRef = require('./database').getDatabase();
+dbRef.prepare(`
+    CREATE TABLE IF NOT EXISTS hotel_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL
+    )
+`).run();
+
+// Seed it with the original list ONLY if it's completely empty
+const registryCount = dbRef.prepare(`SELECT COUNT(*) as count FROM hotel_registry`).get().count;
+if (registryCount === 0) {
+    const initialHotels = [
+        "Anwar Al Madinah", "Saja Al Madinah", "Saja Makkah","Pullman Zamzam Madinah", "Madinah Hilton", "Safwa Tower","Grand Plaza Almadina", "Shahd Al Madinah", "The Oberoi Madina", "Dar Al Taqwa", "Dar Al Eiman Intercontinental", "Grand Plaza Badr Al Maqam", "Dar Al Hijra InterContinental", "Movenpick Madinah", "Crowne Plaza Madinah", "Plaza Inn Ohud","Maysan Altaqwa", "Leader Al Muna Kareem", "Odst Al Madinah", "Artal International", "Zowar International", "Taiba Front", "Al Aqeeq", "Frontel Al Harithia", "Dallah Taibah", "Golden Tulip Al Zahabi", "Al Mukhtara International", "Al Haram Hotel", "Sky View","Province Al Sham", "Taif Al Nebras" , "Gulnar Taiba", "Emaar Al Manar","Bir Al Eiman","Tara Al Hijra","Rama Al Madinah","Miramar","Arkan Almanar","Maysan Rehab Elmysk", "Fairmont Makkah Clock Royal Tower", "Swissotel Makkah", "Swissotel Al Maqam", "Raffles Makkah Palace", "Pullman Zamzam Makkah", "Movenpick Hajar Tower", "Al Marwa Rayhaan by Rotana", "Makkah Hotel", "Makkah Towers","Time Ruba","Shaza Regency","Land Prenium","Taiba Madinah", "Hilton Makkah Convention", "Hilton Suites Makkah", "Hyatt Regency Makkah", "Conrad Makkah", "Jabal Omar Marriott", "Saif Al Majd","Address Jabal Omar", "Sheraton Makkah Jabal Al Kaaba", "DoubleTree by Hilton Makkah", "Le Meridien Makkah", "Waqf Uthman", "Safwat Al Medina","Courtyard By Marriott", "Courtyard By Marriot", "Courtyard Makkah", "Courtyard Madinah","Mira Sud","majd al muhajireen","Maden Madinah","Zila Al Nazula","Anjum Makkah", "Voco Makkah", "Kiswa Towers", "Elaf Ajyad", "Le Meridien Towers Makkah", "Holiday Inn","Worth Peninsula", "Novotel Makkah Thakher City", "Holiday Inn Makkah Al Aziziah", "Triple One" ,"Four Points by Sheraton Makkah", "Emaar Grand Makkah", "Emaar Elite Makkah"
+    ];
+    const insertHotel = dbRef.prepare(`INSERT OR IGNORE INTO hotel_registry (name) VALUES (?)`);
+    dbRef.transaction(() => { initialHotels.forEach(h => insertHotel.run(h)); })();
+    console.log("✅ Successfully seeded the new Hotel Registry database.");
+}
 // ======================================================
 // 👑 OWNER COMMAND HANDLER (Recall/Delete)
 // ======================================================
@@ -519,12 +544,17 @@ sock.ev.on('creds.update', saveCreds);
 sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
+    // 🟢 PASS QR TO FRONTEND DASHBOARD
     if (qr) {
+        globalQR = qr; 
+        globalBotStatus = 'NEEDS_SCAN';
         console.log('\n📱 SCAN QR CODE:\n');
         qrcode.generate(qr, { small: true });
     }
 
     if (connection === 'close') {
+        globalBotStatus = 'DISCONNECTED'; // 🔴 TELL DASHBOARD WE LOST CONNECTION
+        
         if (isReconnecting) return; 
         isReconnecting = true; 
 
@@ -536,6 +566,7 @@ sock.ev.on('connection.update', async (update) => {
         if (statusCode === DisconnectReason.loggedOut) {
             console.log('❌ Device logged out. Please delete the auth folder and scan again.');
             isReconnecting = false;
+            globalBotStatus = 'LOGGED_OUT'; // 🔴 TELL DASHBOARD WE ARE LOGGED OUT
             return;
         }
 
@@ -563,6 +594,8 @@ sock.ev.on('connection.update', async (update) => {
         }, waitTime);
 
     } else if (connection === 'open') {
+        globalQR = null;               // 🟢 CLEAR DASHBOARD QR
+        globalBotStatus = 'CONNECTED'; // 🟢 TELL DASHBOARD WE ARE ONLINE
         isReconnecting = false; 
         console.log('✅ Bot Connected. ACCOUNT RECOVERY MODE: Standing by for 5 minutes...');
     }
@@ -2183,13 +2216,58 @@ startBot()
 // 🌐 EXPRESS DASHBOARD (CONTROL PANEL)
 // ======================================================
 const express = require('express');
+const session = require('express-session'); // 🛡️ NEW: Session manager
 const app = express();
 const { getGroupInfo, db, assignTierToGroup, upsertGroup } = require('./database'); 
 
 app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true })); 
 
-app.get('/', (req, res) => {
+// ==========================================
+// 🔒 AUTHENTICATION SYSTEM
+// ==========================================
+app.use(session({
+    secret: 'turalex-secure-key-2026',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+}));
+
+// Login Page Route
+app.get('/login', (req, res) => {
+    res.render('login', { error: null });
+});
+
+// Login POST Handler (admin / admin)
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === 'admin' && password === 'admin') {
+        req.session.loggedIn = true;
+        res.redirect('/');
+    } else {
+        res.render('login', { error: 'Invalid username or password' });
+    }
+});
+
+// Logout Handler
+app.get('/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/login');
+});
+
+// 🛡️ THE GATEKEEPER MIDDLEWARE
+const requireAuth = (req, res, next) => {
+    if (req.session.loggedIn) {
+        next();
+    } else {
+        res.redirect('/login');
+    }
+};
+
+// ❌ REMOVE the global app.use('/', requireAuth) line completely. 
+// Instead, we inject it specifically into the routes below.
+
+app.get('/', requireAuth, (req, res) => {
     try {
         // Safe check for Vendor Replies (in case the 'quotes' table isn't fully set up yet)
         let totalReplies = 0;
@@ -2219,21 +2297,6 @@ app.get('/', (req, res) => {
     }
 });
 
-// 1. GROUP DIRECTORY PAGE
-app.get('/clients', (req, res) => {
-    try {
-        const groups = db.prepare("SELECT * FROM groups ORDER BY name ASC").all();
-        const tiers = db.prepare("SELECT tier_name FROM limit_tiers").all();
-        
-        // 🌟 NEW: Fetch all unique markup tiers from the markup_rules table
-        const markupTiers = db.prepare("SELECT DISTINCT client_code AS tier_name FROM markup_rules").all();
-        
-        res.render('clients', { groups, tiers, markupTiers });
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("Error loading groups.");
-    }
-});
 
 // 2. INLINE QUICK UPDATE
 app.post('/group/:id/quick-update', express.urlencoded({ extended: true }), (req, res) => {
@@ -2255,7 +2318,7 @@ app.post('/group/:id/quick-update', express.urlencoded({ extended: true }), (req
 });
 
 // Reuse your existing group detail route for the actual "Update Role" logic
-app.get('/group/:id', (req, res) => {
+app.get('/group/:id', requireAuth, (req, res) => {
     const info = db.prepare("SELECT * FROM groups WHERE group_id = ?").get(req.params.id);
     const tiers = db.prepare("SELECT tier_name FROM limit_tiers").all();
     res.render('group_edit', { info, tiers });
@@ -2307,53 +2370,83 @@ app.post('/group/:id/update', express.urlencoded({ extended: true }), (req, res)
 // ==========================================
 
 // 1. VIEW VENDORS PAGE
-app.get('/vendors', (req, res) => {
+// ==========================================
+// 🏨 GET: VENDOR MAPPING PAGE
+// ==========================================
+app.get('/vendors', requireAuth, (req, res) => {
     try {
-        const vendors = db.prepare("SELECT * FROM groups WHERE role = 'VENDOR' ORDER BY name ASC").all();
-
-        // Safely parse the JSON hotel lists so the frontend can read them
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        
+        // 1. Fetch only groups assigned as VENDORS
+        const vendors = db.prepare("SELECT * FROM groups WHERE role = 'VENDOR'").all();
+        
+        // 2. Parse their handled_hotels arrays
         vendors.forEach(v => {
-            try { v.handled_hotels = JSON.parse(v.handled_hotels); } 
-            catch (e) { v.handled_hotels = []; }
+            try {
+                v.handled_hotels = JSON.parse(v.handled_hotels) || [];
+            } catch (e) {
+                v.handled_hotels = [];
+            }
         });
 
-        // 🌟 IMPORT YOUR SANITIZER LIST HERE
-        const { OFFICIAL_REGISTRY } = require('./aiSanitizer');
-        
-        // Fallback just in case
-        const safeHotelList = Array.isArray(OFFICIAL_REGISTRY) ? OFFICIAL_REGISTRY : [
-            "Pullman Zamzam Madinah", "Anwar Al Madinah", "Makkah Towers", "Swissotel Makkah"
-        ];
+        // 3. 🛡️ NEW: Fetch the dynamic Golden Registry from the database
+        let allHotels = [];
+        try {
+            const rows = db.prepare("SELECT name FROM hotel_registry ORDER BY name ASC").all();
+            allHotels = rows.map(r => r.name);
+        } catch (e) {
+            console.error("Failed to fetch hotel registry for vendors page:", e);
+        }
 
-        res.render('vendors', { vendors, allHotels: safeHotelList });
+        // 4. Pass the vendors AND the dynamic hotel list to the EJS template
+        res.render('vendors', { vendors, allHotels });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).send("Error loading vendors.");
+        console.error("Error loading vendors:", err);
+        res.status(500).send("Error loading vendors");
     }
 });
 
 // 2. ADD HOTEL TO VENDOR
-app.post('/vendor/:id/add-hotel', express.urlencoded({ extended: true }), (req, res) => {
+// ==========================================
+// 🏨 VENDOR MAPPING: ADD HOTELS (MULTI-SELECT UPGRADE)
+// ==========================================
+app.post('/vendor/:groupId/add-hotel', (req, res) => {
+    const groupId = req.params.groupId;
+    // 🛡️ The frontend will send a comma-separated list of hotels
+    const hotelNamesRaw = req.body.hotel_names; 
+
+    if (!hotelNamesRaw) return res.redirect('/vendors');
+
     try {
-        const vendorId = req.params.id;
-        const newHotel = req.body.hotel_name.trim();
-
-        const group = db.prepare("SELECT handled_hotels FROM groups WHERE group_id = ?").get(vendorId);
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
         
-        if (group) {
-            let hotels = JSON.parse(group.handled_hotels || '[]');
+        // 1. Get the current list
+        const vendor = db.prepare("SELECT handled_hotels FROM groups WHERE group_id = ?").get(groupId);
+        let handled = [];
+        try { handled = JSON.parse(vendor.handled_hotels); } catch(e) {}
 
-            // 🛡️ THE FIX: Add the new hotel, but DO NOT remove 'ALL' if it exists.
-            if (newHotel && !hotels.includes(newHotel)) {
-                hotels.push(newHotel);
-                db.prepare("UPDATE groups SET handled_hotels = ? WHERE group_id = ?").run(JSON.stringify(hotels), vendorId);
+        // 2. Split the incoming comma-separated string into an array, clean it up
+        const newHotels = hotelNamesRaw.split(',').map(h => h.trim()).filter(h => h.length > 0);
+
+        // 3. Add them to the list (avoiding duplicates)
+        newHotels.forEach(newHotel => {
+            if (!handled.includes(newHotel)) {
+                handled.push(newHotel);
             }
-        }
-        res.redirect('/vendors');
-    } catch (error) {
-        console.error("Error adding hotel mapping:", error);
-        res.status(500).send("Internal Server Error");
+        });
+
+        // 4. Save back to database
+        db.prepare("UPDATE groups SET handled_hotels = ? WHERE group_id = ?")
+          .run(JSON.stringify(handled), groupId);
+          
+    } catch (e) {
+        console.error("Failed to add hotels to vendor:", e);
     }
+    
+    res.redirect('/vendors');
 });
 
 // 3. REMOVE HOTEL FROM VENDOR
@@ -2380,13 +2473,107 @@ app.post('/vendor/:id/remove-hotel', express.urlencoded({ extended: true }), (re
 });
 
 // ==========================================
+// 📋 HOTEL REGISTRY MANAGEMENT ROUTES
+// ==========================================
+
+// 1. View Registry
+app.get('/registry', requireAuth, (req, res) => {
+    const { getDatabase } = require('./database');
+    const db = getDatabase();
+    const hotels = db.prepare("SELECT * FROM hotel_registry ORDER BY name ASC").all();
+    res.render('registry', { hotels });
+});
+
+// 1. GROUP DIRECTORY PAGE
+app.get('/clients', requireAuth, (req, res) => {
+    try {
+        const groups = db.prepare("SELECT * FROM groups ORDER BY name ASC").all();
+        const tiers = db.prepare("SELECT tier_name FROM limit_tiers").all();
+        
+        // 🌟 NEW: Fetch all unique markup tiers from the markup_rules table
+        const markupTiers = db.prepare("SELECT DISTINCT client_code AS tier_name FROM markup_rules").all();
+        
+        res.render('clients', { groups, tiers, markupTiers });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error loading groups.");
+    }
+});
+
+
+// 2. Add Hotel
+app.post('/registry/add', express.urlencoded({ extended: true }), (req, res) => {
+    const newHotel = (req.body.hotel_name || '').trim();
+    if (newHotel) {
+        try {
+            const { getDatabase } = require('./database');
+            const db = getDatabase();
+            db.prepare("INSERT INTO hotel_registry (name) VALUES (?)").run(newHotel);
+        } catch (e) {
+            // Fails silently if duplicate
+        }
+    }
+    res.redirect('/registry');
+});
+
+// 3. Remove Hotel
+app.post('/registry/remove', express.urlencoded({ extended: true }), (req, res) => {
+    const hotelId = req.body.hotel_id;
+    if (hotelId) {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        db.prepare("DELETE FROM hotel_registry WHERE id = ?").run(hotelId);
+    }
+    res.redirect('/registry');
+});
+
+// ==========================================
+// 👥 POST: BULK UPDATE GROUPS 
+// ==========================================
+app.post('/groups/bulk-update', (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        
+        const ids = req.body.group_id || [];
+        const names = req.body.group_name || []; // 🛡️ Grabs the edited names
+        const codes = req.body.client_code || [];
+        const roles = req.body.role || [];
+        const tiers = req.body.limit_tier || [];
+
+        const updateStmt = db.prepare(`
+            UPDATE groups 
+            SET name = ?, client_code = ?, role = ?, limit_tier = ?
+            WHERE group_id = ?
+        `);
+
+        const transaction = db.transaction(() => {
+            for (let i = 0; i < ids.length; i++) {
+                const name = names[i] ? names[i].trim() : 'Unnamed Group';
+                const code = codes[i] ? codes[i].trim() : '';
+                const role = roles[i] ? roles[i].trim().toUpperCase() : 'NONE';
+                const tier = tiers[i] ? tiers[i].trim() : 'DEFAULT';
+                
+                updateStmt.run(name, code, role, tier, ids[i]);
+            }
+        });
+
+        transaction();
+        res.redirect('/clients'); 
+        
+    } catch (e) {
+        console.error("Bulk Update Error:", e);
+        res.status(500).send("Failed to bulk update groups.");
+    }
+});
+// ==========================================
 // ⚙️ RULES & LIMITS MANAGEMENT
 // ==========================================
 
 // --- PROFIT MARKUPS ---
 
 // 1. VIEW MARKUPS PAGE
-app.get('/rules/markup', (req, res) => {
+app.get('/rules/markup', requireAuth, (req, res) => {
     try {
         const markups = db.prepare("SELECT * FROM markup_rules ORDER BY client_code ASC, min_price ASC").all();
         res.render('rules-markup', { markups });
@@ -2429,7 +2616,7 @@ app.post('/rules/markup/delete-tier/:id', (req, res) => {
 // --- USAGE LIMITS ---
 
 // 1. VIEW LIMITS PAGE
-app.get('/rules/limits', (req, res) => {
+app.get('/rules/limits', requireAuth, (req, res) => {
     try {
         const limits = db.prepare("SELECT * FROM limit_tiers ORDER BY tier_name ASC").all();
         res.render('rules-limits', { limits });
@@ -2472,7 +2659,7 @@ app.post('/rules/limits/delete/:name', (req, res) => {
 // ==========================================
 
 // 1. VIEW EMPLOYEES & SCAN OWNER GROUPS DIRECTLY VIA WHATSAPP
-app.get('/employees', async (req, res) => {
+app.get('/employees', requireAuth, async (req, res) => {
     try {
         const { getDatabase } = require('./database');
         const db = getDatabase();
@@ -2773,6 +2960,47 @@ app.get('/db-stats', (req, res) => {
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
+});
+
+// ==========================================
+// 📱 WA CONNECTION MANAGER API
+// ==========================================
+app.get('/api/bot-status', (req, res) => {
+    res.json({
+        status: globalBotStatus,
+        qr: globalQR
+    });
+});
+
+app.post('/api/bot-reset', async (req, res) => {
+    console.log("🛑 Manual Reset Triggered via Web Dashboard");
+    globalBotStatus = 'RESTARTING';
+    globalQR = null;
+
+    // 1. Destroy current connection
+    if (globalSock) {
+        globalSock.ev.removeAllListeners();
+        try { globalSock.logout(); } catch(e) {}
+        try { globalSock.ws.close(); } catch(e) {}
+        globalSock = null;
+    }
+
+    // 2. Wait 1.5 seconds for file locks to release, then delete the auth folder
+    setTimeout(() => {
+        try {
+            // Force delete the folder. Assumes index.js is running from the bot root.
+            const authPath = path.resolve('./auth_main'); 
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log("🗑️ Auth folder deleted successfully.");
+        } catch (e) {
+            console.error("⚠️ Failed to delete auth folder:", e.message);
+        }
+
+        // 3. Restart the bot
+        startBot();
+    }, 1500);
+
+    res.json({ success: true, message: "Bot is restarting and generating new QR..." });
 });
 
 // ==========================================

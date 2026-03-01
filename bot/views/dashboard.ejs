@@ -6,6 +6,35 @@
         <p style="color: var(--text-muted); margin: 0; font-size: 14px;">Live metrics from the WhatsApp server.</p>
     </div>
 
+    <div style="margin-bottom: 32px; background: white; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); padding: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+                <h2 style="margin: 0; font-size: 18px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="smartphone" style="color: #3b82f6;"></i> WhatsApp Connection
+                </h2>
+                <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 13px;" id="wa-status-text">Checking status...</p>
+            </div>
+            
+            <div style="display: flex; gap: 12px;">
+                <button id="btnScanQR" style="display: none; background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; transition: 0.2s;">
+                    <i data-lucide="qr-code" style="width: 16px; vertical-align: -3px; margin-right: 4px;"></i> Scan QR Code
+                </button>
+                <button id="btnResetWA" style="background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; transition: 0.2s;">
+                    <i data-lucide="refresh-cw" style="width: 16px; vertical-align: -3px; margin-right: 4px;"></i> Force Reset
+                </button>
+            </div>
+        </div>
+
+        <div id="qrContainer" style="display: none; margin-top: 24px; padding-top: 24px; border-top: 1px dashed var(--border); text-align: center;">
+            <p style="font-weight: 700; color: #0f172a; margin-bottom: 16px;">Scan this code with WhatsApp to link the bot</p>
+            <div id="qrCanvasWrapper" style="display: inline-block; padding: 16px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); min-width: 250px; min-height: 250px; align-content: center;">
+                
+                <div id="qrLoadingText" style="color: #94a3b8; font-size: 14px; margin-top: 110px;">Generating...</div>
+                <img id="qrImageElement" src="" alt="WhatsApp QR Code" style="display: none; width: 250px; height: 250px; margin: 0 auto; border-radius: 8px;">
+                
+            </div>
+        </div>
+    </div>
     <div class="stats-grid">
         <div class="card">
             <div class="icon-box" style="background: #ecfdf5; color: #10b981;"><i data-lucide="activity"></i></div>
@@ -48,7 +77,100 @@
 </div>
 
 <script>
-    // Chart Logic
+    // ==========================================
+    // 🧠 WHATSAPP QR AUTO-POLLING LOGIC
+    // ==========================================
+    document.addEventListener("DOMContentLoaded", () => {
+        const statusText = document.getElementById('wa-status-text');
+        const btnScanQR = document.getElementById('btnScanQR');
+        const btnResetWA = document.getElementById('btnResetWA');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrImg = document.getElementById('qrImageElement');
+        const qrLoader = document.getElementById('qrLoadingText');
+        
+        let currentQRStr = null;
+
+        const checkStatus = async () => {
+            try {
+                const res = await fetch('/api/bot-status');
+                const data = await res.json();
+
+                if (data.status === 'CONNECTED') {
+                    statusText.innerHTML = `<span style="color: #10b981; font-weight: 700;">● Online & Linked</span>`;
+                    btnScanQR.style.display = 'none';
+                    qrContainer.style.display = 'none';
+                    currentQRStr = null;
+                } 
+                else if (data.status === 'NEEDS_SCAN' && data.qr) {
+                    statusText.innerHTML = `<span style="color: #f59e0b; font-weight: 700;">● Awaiting Scan</span>`;
+                    btnScanQR.style.display = 'block';
+                    
+                    // Only fetch a new image if the Baileys QR string changed
+                    if (currentQRStr !== data.qr) {
+                        currentQRStr = data.qr;
+                        
+                        qrImg.style.display = 'none';
+                        qrLoader.style.display = 'block';
+                        
+                        // Pass string directly to an external rendering API
+                        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(data.qr)}`;
+                        
+                        qrImg.onload = () => {
+                            qrLoader.style.display = 'none';
+                            qrImg.style.display = 'block';
+                        };
+                    }
+                } 
+                else {
+                    let niceStatus = data.status === 'LOGGED_OUT' ? 'Device Logged Out' : data.status || 'Loading...';
+                    statusText.innerHTML = `<span style="color: #64748b; font-weight: 700;">● ${niceStatus}</span>`;
+                    btnScanQR.style.display = 'none';
+                    qrContainer.style.display = 'none';
+                    currentQRStr = null;
+                }
+
+            } catch (e) {
+                statusText.innerHTML = `<span style="color: #dc2626; font-weight: 700;">● Backend Unreachable</span>`;
+            }
+        };
+
+        // Start checking instantly, then every 3 seconds
+        checkStatus();
+        setInterval(checkStatus, 3000);
+
+        // Toggle QR Visibility
+        btnScanQR.addEventListener('click', () => {
+            qrContainer.style.display = qrContainer.style.display === 'none' ? 'block' : 'none';
+        });
+
+        // Trigger Hard Reset
+        btnResetWA.addEventListener('click', async () => {
+            const conf = confirm("⚠️ Are you sure? This will permanently log out the current WhatsApp session and delete the auth keys.");
+            if (!conf) return;
+
+            btnResetWA.disabled = true;
+            btnResetWA.innerHTML = "Restarting...";
+            qrContainer.style.display = 'none';
+            statusText.innerHTML = `<span style="color: #3b82f6; font-weight: 700;">● Restarting engine... please wait</span>`;
+
+            try {
+                await fetch('/api/bot-reset', { method: 'POST' });
+            } catch (e) {
+                alert("Error sending reset command to server.");
+            }
+
+            // Unlock the button after a delay to prevent spamming
+            setTimeout(() => {
+                btnResetWA.disabled = false;
+                btnResetWA.innerHTML = `<i data-lucide="refresh-cw" style="width: 16px; vertical-align: -3px; margin-right: 4px;"></i> Force Reset`;
+                lucide.createIcons();
+            }, 6000);
+        });
+    });
+
+    // ==========================================
+    // 📊 CHART LOGIC
+    // ==========================================
     const chartCanvas = document.getElementById('trafficChart');
     if (chartCanvas) {
         const rawData = JSON.parse(chartCanvas.getAttribute('data-graph') || '[]');

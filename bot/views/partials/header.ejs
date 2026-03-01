@@ -22,7 +22,7 @@
         #sidebar.collapsed .nav-text, #sidebar.collapsed .logo-text, #sidebar.collapsed .menu-label, #sidebar.collapsed .chevron { display: none; }
         #sidebar.collapsed .menu-item { justify-content: center; }
 
-        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; color: var(--primary); font-weight: 700; font-size: 20px; overflow: hidden; white-space: nowrap; }
+        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; color: var(--primary); font-weight: 700; font-size: 20px; overflow: hidden; white-space: nowrap; text-decoration: none;}
         .menu-label { color: #475569; font-size: 11px; text-transform: uppercase; margin-bottom: 12px; }
         .menu-item { display: flex; align-items: center; gap: 12px; padding: 12px; color: #94a3b8; text-decoration: none; border-radius: 10px; cursor: pointer; margin-bottom: 4px; }
         .menu-item:hover, .menu-item.active { background: var(--primary-soft); color: var(--primary); }
@@ -46,9 +46,22 @@
         .header-right { display: flex; align-items: center; gap: 20px; }
         .toggle-btn { cursor: pointer; background: #f1f5f9; border: none; padding: 8px; border-radius: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: center; }
         
-        /* Pulsing Dot */
-        .status-pill { display: flex; align-items: center; gap: 8px; background: #ecfdf5; padding: 6px 12px; border-radius: 20px; border: 1px solid #a7f3d0; }
-        .pulse-dot { width: 8px; height: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse 1.5s infinite; }
+        /* 🟢 Dynamic Status Pill */
+        .status-pill { display: flex; align-items: center; gap: 8px; background: #f1f5f9; padding: 6px 12px; border-radius: 20px; border: 1px solid #e2e8f0; }
+        .pulse-dot { width: 8px; height: 8px; background-color: #94a3b8; border-radius: 50%; }
+
+        .status-pill.online { background: #ecfdf5; border-color: #a7f3d0; }
+        .status-pill.online .pulse-dot { background-color: #10b981; animation: pulse 1.5s infinite; }
+        .status-pill.online span { color: #059669; }
+
+        .status-pill.offline { background: #fef2f2; border-color: #fecaca; }
+        .status-pill.offline .pulse-dot { background-color: #ef4444; }
+        .status-pill.offline span { color: #dc2626; }
+
+        .status-pill.warning { background: #fffbeb; border-color: #fde68a; }
+        .status-pill.warning .pulse-dot { background-color: #f59e0b; animation: pulse 1.5s infinite; }
+        .status-pill.warning span { color: #d97706; }
+
         @keyframes pulse {
             0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
             70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
@@ -65,7 +78,7 @@
         .val { font-size: 28px; font-weight: 700; color: var(--text-main); }
         .label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 
-        /* Mobile Adjustments */
+        /* Mobile Adjustments (Restored to your exact original version) */
         .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 900; }
         .mobile-nav { display: none; }
 
@@ -90,12 +103,17 @@
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="toggleSidebar()"></div>
 
-<aside id="sidebar">
-        <div class="logo">
+    <aside id="sidebar">
+        <a href="/" class="logo">
             <i data-lucide="zap" style="min-width: 24px;"></i> <span class="logo-text">TURALEX AI</span>
-        </div>
-<div class="menu-section">
+        </a>
+        
+        <div class="menu-section" style="flex-grow: 1;">
             <div class="menu-label">Control Panel</div>
+
+            <a href="/" class="menu-item">
+                <i data-lucide="layout-dashboard"></i> <span class="nav-text">Dashboard</span>
+            </a>
             
             <div class="menu-item" onclick="toggleSub('group-nav')">
                 <i data-lucide="users"></i> <span class="nav-text">Groups</span><i data-lucide="chevron-down" class="chevron"></i>
@@ -103,6 +121,7 @@
             <div class="submenu" id="group-nav">
                 <a href="/clients">Client Directory</a>
                 <a href="/vendors">Vendor Mapping</a>
+                <a href="/registry">Hotel Registry DB</a>
             </div>
 
             <a href="/employees" class="menu-item">
@@ -113,7 +132,6 @@
                 <i data-lucide="activity"></i> <span class="nav-text">Local Rates Engine</span>
             </a>
             
-
             <div class="menu-item" onclick="toggleSub('rules-nav')">
                 <i data-lucide="calculator"></i> <span class="nav-text">Rule Engine</span><i data-lucide="chevron-down" class="chevron"></i>
             </div>
@@ -122,8 +140,13 @@
                 <a href="/rules/limits">Usage Limits</a>
             </div>
         </div>
+
+        <div style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+            <a href="/logout" class="menu-item" style="color: #ef4444;">
+                <i data-lucide="log-out"></i> <span class="nav-text">Secure Logout</span>
+            </a>
         </div>
-        </aside>
+    </aside>
 
     <main id="main-content">
         <header>
@@ -136,13 +159,71 @@
             </div>
             
             <div class="header-right">
-                <div class="status-pill">
+                <div class="status-pill" id="globalStatusPill">
                     <div class="pulse-dot"></div>
-                    <span style="color: #059669; font-size: 12px; font-weight: 700;">BOT ONLINE</span>
+                    <span style="font-size: 12px; font-weight: 700;" id="globalStatusText">CHECKING...</span>
                 </div>
-                <div class="user-avatar">
-                    <i data-lucide="user" style="width: 18px;"></i>
+                <div class="user-avatar" title="Logged in as Admin">
+                    <i data-lucide="shield-check" style="width: 18px; color: #10b981;"></i>
                 </div>
             </div>
         </header>
-       
+
+        <script>
+            const dateOptions = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
+            document.getElementById('live-date').innerText = new Date().toLocaleDateString('en-US', dateOptions);
+
+            function toggleSidebar() {
+                const sidebar = document.getElementById('sidebar');
+                const overlay = document.getElementById('overlay');
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.toggle('mobile-open');
+                    overlay.classList.toggle('active');
+                } else {
+                    sidebar.classList.toggle('collapsed');
+                }
+            }
+
+            function toggleSub(id) {
+                const menu = document.getElementById(id);
+                menu.classList.toggle('open');
+            }
+
+            // 🧠 GLOBAL REAL-TIME STATUS POLLER
+            const globalStatusPill = document.getElementById('globalStatusPill');
+            const globalStatusText = document.getElementById('globalStatusText');
+
+            async function fetchGlobalStatus() {
+                try {
+                    const res = await fetch('/api/bot-status');
+                    // Prevent script from crashing if it hits the login redirect wall
+                    if (res.status === 401 || res.redirected) return; 
+                    
+                    const data = await res.json();
+
+                    globalStatusPill.className = 'status-pill'; 
+
+                    if (data.status === 'CONNECTED') {
+                        globalStatusPill.classList.add('online');
+                        globalStatusText.innerText = 'BOT ONLINE';
+                    } else if (data.status === 'NEEDS_SCAN') {
+                        globalStatusPill.classList.add('warning');
+                        globalStatusText.innerText = 'NEEDS SCAN';
+                    } else if (data.status === 'DISCONNECTED' || data.status === 'LOGGED_OUT') {
+                        globalStatusPill.classList.add('offline');
+                        globalStatusText.innerText = 'OFFLINE';
+                    } else {
+                        globalStatusText.innerText = data.status || 'LOADING...';
+                    }
+                } catch (e) {
+                    globalStatusPill.className = 'status-pill offline';
+                    globalStatusText.innerText = 'API ERROR';
+                }
+            }
+
+            // Poll every 4 seconds in the background across all pages
+            fetchGlobalStatus();
+            setInterval(fetchGlobalStatus, 4000);
+            
+            document.addEventListener('DOMContentLoaded', () => { lucide.createIcons(); });
+        </script>

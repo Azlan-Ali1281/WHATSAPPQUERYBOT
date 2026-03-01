@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turalex AI | Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: #1e293b; }
+        .login-card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 100%; max-width: 360px; text-align: center; }
+        .logo { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; color: #10b981; font-weight: 700; font-size: 24px; }
+        .subtitle { color: #64748b; font-size: 14px; margin-bottom: 32px; }
+        .input-group { text-align: left; margin-bottom: 16px; }
+        .input-group label { display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; text-transform: uppercase; }
+        .input-group input { width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none; transition: 0.2s; box-sizing: border-box;}
+        .input-group input:focus { border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+        .btn-login { width: 100%; background: #10b981; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 700; font-size: 15px; cursor: pointer; transition: 0.2s; margin-top: 8px; }
+        .btn-login:hover { background: #059669; }
+        .error-msg { background: #fee2e2; color: #dc2626; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <div class="logo">
+            <i data-lucide="zap"></i> TURALEX AI
+        </div>
+        <div class="subtitle">B2B Travel Automation Engine</div>
+
+        <% if (error) { %>
+            <div class="error-msg"><i data-lucide="alert-circle" style="width: 14px; vertical-align: -2px;"></i> <%= error %></div>
+        <% } %>
+
+        <form action="/login" method="POST">
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" name="username" placeholder="Enter username" required autofocus>
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="Enter password" required>
+            </div>
+            <button type="submit" class="btn-login">Secure Login</button>
+        </form>
+    </div>
+
+    <script>lucide.createIcons();</script>
+</body>
+</html>
