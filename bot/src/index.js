@@ -2221,7 +2221,12 @@ const app = express();
 const { getGroupInfo, db, assignTierToGroup, upsertGroup } = require('./database'); 
 
 app.set('view engine', 'ejs');
-app.use(express.urlencoded({ extended: true })); 
+// 🛡️ INCREASED LIMITS FOR BULK UPDATES
+app.use(express.urlencoded({ 
+    extended: true, 
+    parameterLimit: 50000, // Allows up to 50,000 form fields
+    limit: '50mb'          // Increases max payload size
+}));
 
 // ==========================================
 // 🔒 AUTHENTICATION SYSTEM
@@ -2528,22 +2533,23 @@ app.post('/registry/remove', express.urlencoded({ extended: true }), (req, res) 
 });
 
 // ==========================================
-// 👥 POST: BULK UPDATE GROUPS 
+// 👥 POST: BULK UPDATE GROUPS (Now includes Markup)
 // ==========================================
-app.post('/groups/bulk-update', (req, res) => {
+app.post('/groups/bulk-update', requireAuth, (req, res) => {
     try {
         const { getDatabase } = require('./database');
         const db = getDatabase();
         
         const ids = req.body.group_id || [];
-        const names = req.body.group_name || []; // 🛡️ Grabs the edited names
+        const names = req.body.group_name || []; 
         const codes = req.body.client_code || [];
         const roles = req.body.role || [];
-        const tiers = req.body.limit_tier || [];
+        const limit_tiers = req.body.limit_tier || [];
+        const markup_tiers = req.body.markup_tier || []; // 🛡️ NEW: Grab Markup Tiers
 
         const updateStmt = db.prepare(`
             UPDATE groups 
-            SET name = ?, client_code = ?, role = ?, limit_tier = ?
+            SET name = ?, client_code = ?, role = ?, limit_tier = ?, markup_tier = ?
             WHERE group_id = ?
         `);
 
@@ -2552,9 +2558,10 @@ app.post('/groups/bulk-update', (req, res) => {
                 const name = names[i] ? names[i].trim() : 'Unnamed Group';
                 const code = codes[i] ? codes[i].trim() : '';
                 const role = roles[i] ? roles[i].trim().toUpperCase() : 'NONE';
-                const tier = tiers[i] ? tiers[i].trim() : 'DEFAULT';
+                const limit = limit_tiers[i] ? limit_tiers[i].trim() : 'DEFAULT';
+                const markup = markup_tiers[i] ? markup_tiers[i].trim() : 'DEFAULT';
                 
-                updateStmt.run(name, code, role, tier, ids[i]);
+                updateStmt.run(name, code, role, limit, markup, ids[i]);
             }
         });
 
@@ -2566,6 +2573,7 @@ app.post('/groups/bulk-update', (req, res) => {
         res.status(500).send("Failed to bulk update groups.");
     }
 });
+
 // ==========================================
 // ⚙️ RULES & LIMITS MANAGEMENT
 // ==========================================

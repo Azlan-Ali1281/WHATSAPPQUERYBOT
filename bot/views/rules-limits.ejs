@@ -1,7 +1,7 @@
 <%- include('partials/header.ejs') %>
 
 <style>
-    .card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 24px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); max-width: 900px; }
+    .card { background: white; border-radius: 12px; border: 1px solid var(--border); padding: 24px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); max-width: 950px; }
     .card-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text-main); border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
     
     table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 24px; }
@@ -14,6 +14,7 @@
     .btn-save-sm { background: #1e293b; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }
     .btn-save-sm:hover { background: #0f172a; }
 
+    /* Adjust the grid to fit 5 columns now */
     @media (max-width: 768px) {
         .limits-grid { grid-template-columns: 1fr 1fr !important; }
     }
@@ -33,10 +34,11 @@
                 <thead>
                     <tr>
                         <th>Tier Name</th>
-                        <th title="Child Queries per Message">C/M</th>
-                        <th title="Max Hotels">H</th>
-                        <th title="Max Dates">D</th>
-                        <th title="Max Rooms">R</th>
+                        <th title="Total Queries Allowed Per Day">Daily Limit</th>
+                        <th title="Max Output Queries Generated Per Message">Child/Msg</th>
+                        <th title="Max Hotels Processed Per Date">Hotels</th>
+                        <th title="Max Date Ranges Checked">Dates</th>
+                        <th title="Max Room Types Checked">Rooms</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -44,14 +46,15 @@
                     <% limits.forEach(tier => { %>
                     <tr>
                         <td style="font-weight: 800;"><%= tier.tier_name %></td>
+                        <td style="font-weight: 700; color: #3b82f6;"><%= tier.max_daily_queries || 50 %></td>
                         <td><%= tier.max_child_queries %></td>
                         <td><%= tier.max_hotels_per_date %></td>
                         <td><%= tier.max_date_ranges %></td>
                         <td><%= tier.max_room_types %></td>
                         <td style="text-align: right;">
                             <% if(tier.tier_name !== 'DEFAULT') { %>
-                            <form action="/rules/limits/delete/<%= tier.tier_name %>" method="POST">
-                                <button class="btn-del" style="background:none; border:none; color:#ef4444; cursor:pointer;"><i data-lucide="trash-2" style="width:16px;"></i></button>
+                            <form action="/rules/limits/delete/<%= tier.tier_name %>" method="POST" style="margin: 0;">
+                                <button class="btn-del" style="background:none; border:none; color:#ef4444; cursor:pointer;" title="Delete Tier"><i data-lucide="trash-2" style="width:16px;"></i></button>
                             </form>
                             <% } %>
                         </td>
@@ -64,26 +67,31 @@
         <div class="add-form-bg">
             <p style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;">Add or Update Limit Tier</p>
             <form action="/rules/limits/upsert" method="POST">
-                <input type="text" name="tier_name" class="rule-input-sm" placeholder="Tier Name (e.g. PRO)" required style="margin-bottom:16px;">
-                <div class="limits-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                <input type="text" name="tier_name" class="rule-input-sm" placeholder="Tier Name (e.g. VIP, PRO)" required style="margin-bottom:16px;">
+                
+                <div class="limits-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;">
+                    <div>
+                        <label style="font-size: 11px; color: #10b981; font-weight: 800; display:block; margin-bottom:4px;">DAILY QUERIES</label>
+                        <input type="number" name="max_daily" class="rule-input-sm" value="50" min="1" required>
+                    </div>
                     <div>
                         <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">CHILD/MSG</label>
-                        <input type="number" name="max_child" class="rule-input-sm" value="6">
+                        <input type="number" name="max_child" class="rule-input-sm" value="6" min="1">
                     </div>
                     <div>
                         <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">HOTELS</label>
-                        <input type="number" name="max_hotel" class="rule-input-sm" value="4">
+                        <input type="number" name="max_hotel" class="rule-input-sm" value="4" min="1">
                     </div>
                     <div>
                         <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">DATES</label>
-                        <input type="number" name="max_date" class="rule-input-sm" value="3">
+                        <input type="number" name="max_date" class="rule-input-sm" value="3" min="1">
                     </div>
                     <div>
                         <label style="font-size: 11px; color: #64748b; font-weight: 700; display:block; margin-bottom:4px;">ROOM TYPES</label>
-                        <input type="number" name="max_room" class="rule-input-sm" value="2">
+                        <input type="number" name="max_room" class="rule-input-sm" value="2" min="1">
                     </div>
                 </div>
-                <input type="hidden" name="max_daily" value="50">
+                
                 <button type="submit" class="btn-save-sm" style="margin-top:20px;">Save Limit Tier</button>
             </form>
         </div>
