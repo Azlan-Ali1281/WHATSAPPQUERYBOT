@@ -1593,41 +1593,57 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
 // --- SANITIZATION & LOOP ---
 
+// --- SANITIZATION & LOOP ---
+
         let rawSanitizedResults = await sanitizeHotelNames(potentialHotels);
         
-        // 🛡️ THE CRASH FIX: Initialize these BEFORE the loop starts!
+        // 🛡️ NEW FIX: MULTI-LABEL DROPPER (Inside Phase 2)
+        // We must apply the label dropper here so the second AI call knows what to kill
+        if (Array.isArray(rawSanitizedResults)) {
+            const labelIndexes = [];
+            rawSanitizedResults.forEach((h, i) => {
+                if (h && /^(MAKKAH HOTEL|MADINAH HOTEL|MAKKAH|MADINAH)$/i.test(h.trim())) {
+                    labelIndexes.push(i);
+                }
+            });
+            // Ensure there is at least one real hotel before dropping labels
+            const hasRealHotels = rawSanitizedResults.some((h, i) => h && !labelIndexes.includes(i));
+            if (hasRealHotels && labelIndexes.length > 0) {
+                labelIndexes.forEach(idx => rawSanitizedResults[idx] = "DROP_ME");
+            }
+        }
+        
         let sanitizedHotels = [];
         const finalSanitizedMap = {}; 
 
         potentialHotels.forEach((raw, index) => {
-            // Safely grab the matched name, avoiding undefined errors if the array acts weird
             const matchedName = (Array.isArray(rawSanitizedResults) && rawSanitizedResults[index]) ? rawSanitizedResults[index] : null;
             
-            // Search the ORIGINAL text lines to find stripped keywords
+            // 🛑 THE HARD STOP: If it's a label, kill it instantly!
+            // This prevents the fallbacks below from accidentally resurrecting it.
+            if (matchedName === 'DROP_ME') {
+                console.log(`🗑️ Dropping label inside Phase 2: "${raw}"`);
+                return; // Skips the rest of the loop for this item
+            }
+
             const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;
-            
-            // 🛡️ FIX 1: MASSIVELY EXPANDED STRONG KEYWORDS
-            // Added: arkan, manar, plaza, palace, qasr, maqam, resort, boutique
             const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah|nabras|nebras|taiba|sky\s*view|arkan|manar|plaza|palace|qasr|maqam|resort|boutique/i.test(originalLine);
             
-            // 🛡️ FIX 2: THE BULLETPROOF FALLBACK (The "Perfect Name" Detector)
-            // If the sanitizer fails, but the text is 2-5 words, has NO numbers, and NO room/meal keywords, it IS a hotel!
             const isJunkHotel = /room|bed|pax|guest|dbl|double|trp|triple|quad|quint|suite|breakfast|bb|ro|hb|fb|meal|view|haram|city|kaaba|night|days/i.test(raw);
             const hasNumbers = /\d/.test(raw);
             const wordCount = raw.trim().split(/\s+/).length;
             const looksLikePerfectHotelName = !hasNumbers && !isJunkHotel && wordCount >= 2 && wordCount <= 5;
 
-            // Validation Gate Logic: Keep if DB match OR strong keyword OR looks perfectly like a hotel
-            if ((matchedName && matchedName !== 'DROP_ME') || (hasStrongKeyword && raw.length > 3) || looksLikePerfectHotelName) {
-                // If matchedName is valid, use it. Otherwise safely fall back to the raw name.
-                const finalName = (matchedName && matchedName !== 'DROP_ME') ? matchedName : raw; 
+            // 🛡️ UPDATED GATE: Removed the DROP_ME check from here since the Hard Stop handles it
+            if (matchedName || (hasStrongKeyword && raw.length > 3) || looksLikePerfectHotelName) {
+                const finalName = matchedName ? matchedName : raw; 
                 sanitizedHotels.push(finalName);
                 finalSanitizedMap[raw] = finalName;
             } else {
                 console.log(`🗑️ Dropping non-hotel junk: "${raw}"`);
             }
         });
-        // 2. Remove Duplicates & Maintain "Again/Same" logic
+                // 2. Remove Duplicates & Maintain "Again/Same" logic
         sanitizedHotels = [...new Set(sanitizedHotels)];
 
         // 🛑 SMART LIMIT: Trim Max Hotels Per Message
