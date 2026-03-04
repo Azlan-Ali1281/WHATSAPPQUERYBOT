@@ -2254,6 +2254,15 @@ app.use(session({
     cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
 }));
 
+// 🟢 SERVE LOGO DIRECTLY FROM VIEWS FOLDER
+app.get('/hba-bots-logo.png', (req, res) => {
+    res.sendFile(path.join(__dirname, '../views/hba-bots-logo.png'));
+});
+
+app.get('/hba-logo-side.png', (req, res) => {
+    res.sendFile(path.join(__dirname, '../views/hba-logo-side.png'));
+});
+
 // Login Page Route
 app.get('/login', (req, res) => {
     res.render('login', { error: null });
@@ -2636,6 +2645,171 @@ app.post('/rules/markup/delete-tier/:id', (req, res) => {
     res.redirect('/rules/markup');
 });
 
+
+// ==========================================
+// 🏨 STATIC RATES MANAGER (FRONTEND APIs)
+// ==========================================
+
+// 1. VIEW ALL STATIC HOTELS & SEASONS
+app.get('/static-rates', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+
+        const hotels = db.prepare("SELECT * FROM static_hotels ORDER BY hotel_name ASC").all();
+        const seasons = db.prepare("SELECT * FROM static_seasons ORDER BY start_date ASC").all();
+
+        // Format data for the frontend
+        hotels.forEach(h => {
+            h.seasons = seasons.filter(s => s.hotel_id === h.hotel_id);
+            try { h.aliases_str = JSON.parse(h.aliases).join(', '); } catch(e) { h.aliases_str = ''; }
+            try { h.views = JSON.parse(h.view_surcharges); } catch(e) { h.views = {}; }
+            try { h.meals = JSON.parse(h.meal_surcharges); } catch(e) { h.meals = {}; }
+        });
+
+        res.render('static_rates', { hotels });
+    } catch (err) {
+        console.error("Static Rates View Error:", err);
+        res.status(500).send("Error loading static rates dashboard.");
+    }
+});
+
+// 2. ADD NEW HOTEL
+app.post('/static-rates/hotel/add', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        const b = req.body;
+
+        const hotel_id = 'HTL_' + Date.now(); // Generate unique ID
+        const aliasesArr = b.aliases ? b.aliases.split(',').map(a => a.trim()).filter(a => a) : [];
+        
+        const mealsJson = JSON.stringify({
+            bb: parseInt(b.meal_bb) || 0,
+            sahour: parseInt(b.meal_sahour) || 0,
+            iftar: parseInt(b.meal_iftar) || 0,
+            lunch_dinner: parseInt(b.meal_ld) || 0
+        });
+
+        const viewsJson = JSON.stringify({
+            haram: parseInt(b.view_haram) || 0,
+            city: parseInt(b.view_city) || 0
+        });
+
+        db.prepare(`
+            INSERT INTO static_hotels (
+                hotel_id, hotel_name, aliases, 
+                is_room_rate_flat, flat_till_pax, max_pax, 
+                meal_included, included_meal_type, 
+                is_weekend_flat, default_extra_bed_rate, 
+                view_surcharges, meal_surcharges
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            hotel_id, b.hotel_name.trim(), JSON.stringify(aliasesArr),
+            b.is_room_rate_flat ? 1 : 0, parseInt(b.flat_till_pax) || 2, parseInt(b.max_pax) || 4,
+            b.meal_included ? 1 : 0, b.included_meal_type || 'BB',
+            b.is_weekend_flat ? 1 : 0, parseInt(b.default_extra_bed_rate) || 0,
+            viewsJson, mealsJson
+        );
+
+        res.redirect('/static-rates');
+    } catch (err) {
+        console.error("Add Hotel Error:", err);
+        res.status(500).send("Failed to add hotel.");
+    }
+});
+
+// 3. UPDATE EXISTING HOTEL
+app.post('/static-rates/hotel/edit/:id', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        const b = req.body;
+        const hotel_id = req.params.id;
+
+        const aliasesArr = b.aliases ? b.aliases.split(',').map(a => a.trim()).filter(a => a) : [];
+        const mealsJson = JSON.stringify({
+            bb: parseInt(b.meal_bb) || 0,
+            sahour: parseInt(b.meal_sahour) || 0,
+            iftar: parseInt(b.meal_iftar) || 0,
+            lunch_dinner: parseInt(b.meal_ld) || 0
+        });
+        const viewsJson = JSON.stringify({
+            haram: parseInt(b.view_haram) || 0,
+            city: parseInt(b.view_city) || 0
+        });
+
+        db.prepare(`
+            UPDATE static_hotels SET 
+                hotel_name = ?, aliases = ?, 
+                is_room_rate_flat = ?, flat_till_pax = ?, max_pax = ?, 
+                meal_included = ?, included_meal_type = ?, 
+                is_weekend_flat = ?, default_extra_bed_rate = ?, 
+                view_surcharges = ?, meal_surcharges = ?
+            WHERE hotel_id = ?
+        `).run(
+            b.hotel_name.trim(), JSON.stringify(aliasesArr),
+            b.is_room_rate_flat ? 1 : 0, parseInt(b.flat_till_pax) || 2, parseInt(b.max_pax) || 4,
+            b.meal_included ? 1 : 0, b.included_meal_type || 'BB',
+            b.is_weekend_flat ? 1 : 0, parseInt(b.default_extra_bed_rate) || 0,
+            viewsJson, mealsJson, hotel_id
+        );
+
+        res.redirect('/static-rates');
+    } catch (err) {
+        console.error("Update Hotel Error:", err);
+        res.status(500).send("Failed to update hotel.");
+    }
+});
+
+// 4. DELETE HOTEL
+app.post('/static-rates/hotel/delete/:id', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        db.prepare("DELETE FROM static_hotels WHERE hotel_id = ?").run(req.params.id);
+        res.redirect('/static-rates');
+    } catch (err) {
+        res.status(500).send("Failed to delete hotel.");
+    }
+});
+
+// 5. ADD SEASON TO HOTEL
+app.post('/static-rates/season/add/:hotel_id', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        const b = req.body;
+
+        db.prepare(`
+            INSERT INTO static_seasons (
+                hotel_id, description, start_date, end_date, 
+                weekday_sd_rate, weekday_eb_rate, weekend_sd_rate, weekend_eb_rate
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            req.params.hotel_id, b.description || 'New Season', 
+            b.start_date, b.end_date,
+            parseInt(b.weekday_sd_rate) || 0, parseInt(b.weekday_eb_rate) || 0,
+            parseInt(b.weekend_sd_rate) || 0, parseInt(b.weekend_eb_rate) || 0
+        );
+
+        res.redirect('/static-rates');
+    } catch (err) {
+        res.status(500).send("Failed to add season.");
+    }
+});
+
+// 6. DELETE SEASON
+app.post('/static-rates/season/delete/:id', requireAuth, (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        db.prepare("DELETE FROM static_seasons WHERE season_id = ?").run(req.params.id);
+        res.redirect('/static-rates');
+    } catch (err) {
+        res.status(500).send("Failed to delete season.");
+    }
+});
 
 // --- USAGE LIMITS ---
 

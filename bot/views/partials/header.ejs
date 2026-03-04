@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Turalex AI | Management</title>
+    <title>HBA BOTS - DASHBOARD</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -19,8 +19,11 @@
         /* Sidebar */
         #sidebar { width: var(--sidebar-width); background: var(--sidebar-bg); height: 100vh; display: flex; flex-direction: column; padding: 20px; color: white; z-index: 1000; }
         #sidebar.collapsed { width: 80px; padding: 20px 10px; }
-        #sidebar.collapsed .nav-text, #sidebar.collapsed .logo-text, #sidebar.collapsed .menu-label, #sidebar.collapsed .chevron { display: none; }
+        #sidebar.collapsed .nav-text, #sidebar.collapsed .menu-label, #sidebar.collapsed .chevron { display: none; }
         #sidebar.collapsed .menu-item { justify-content: center; }
+        
+        /* Ensures the logo scales down nicely when sidebar collapses */
+        #sidebar.collapsed .logo img { object-position: center; }
 
         .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; color: var(--primary); font-weight: 700; font-size: 20px; overflow: hidden; white-space: nowrap; text-decoration: none;}
         .menu-label { color: #475569; font-size: 11px; text-transform: uppercase; margin-bottom: 12px; }
@@ -78,7 +81,7 @@
         .val { font-size: 28px; font-weight: 700; color: var(--text-main); }
         .label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 
-        /* Mobile Adjustments (Restored to your exact original version) */
+        /* Mobile Adjustments */
         .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 900; }
         .mobile-nav { display: none; }
 
@@ -104,8 +107,8 @@
     <div class="sidebar-overlay" id="overlay" onclick="toggleSidebar()"></div>
 
     <aside id="sidebar">
-        <a href="/" class="logo">
-            <i data-lucide="zap" style="min-width: 24px;"></i> <span class="logo-text">TURALEX AI</span>
+        <a href="/" class="logo" style="padding: 0; justify-content: flex-start;">
+            <img src="/hba-logo-side.png" alt="HBA BOTS" style="width: 100%; max-height: 80px; object-fit: contain; object-position: left;">
         </a>
         
         <div class="menu-section" style="flex-grow: 1;">
@@ -130,6 +133,10 @@
 
             <a href="/local-rates" class="menu-item">
                 <i data-lucide="activity"></i> <span class="nav-text">Local Rates Engine</span>
+            </a>
+            
+            <a href="/static-rates" class="menu-item">
+                <i data-lucide="database"></i> <span class="nav-text">Fallback Rates Engine</span>
             </a>
             
             <div class="menu-item" onclick="toggleSub('rules-nav')">
@@ -196,11 +203,9 @@
             async function fetchGlobalStatus() {
                 try {
                     const res = await fetch('/api/bot-status');
-                    // Prevent script from crashing if it hits the login redirect wall
                     if (res.status === 401 || res.redirected) return; 
                     
                     const data = await res.json();
-
                     globalStatusPill.className = 'status-pill'; 
 
                     if (data.status === 'CONNECTED') {
@@ -221,7 +226,6 @@
                 }
             }
 
-            // Poll every 4 seconds in the background across all pages
             fetchGlobalStatus();
             setInterval(fetchGlobalStatus, 4000);
             

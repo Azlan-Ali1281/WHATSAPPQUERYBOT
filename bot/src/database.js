@@ -71,6 +71,55 @@ db.exec(`
         FOREIGN KEY(child_id) REFERENCES child_queries(id)
     );
 
+    CREATE TABLE IF NOT EXISTS static_hotels (
+        hotel_id TEXT PRIMARY KEY,
+        hotel_name TEXT NOT NULL,
+        
+        -- Stored as JSON Array: e.g., '["Voco", "Vocco", "Makkah Voco"]'
+        aliases TEXT DEFAULT '[]',
+        
+        -- Core Rules
+        is_room_rate_flat INTEGER DEFAULT 0,
+        flat_till_pax INTEGER DEFAULT 2,
+        max_pax INTEGER DEFAULT 4,
+        
+        -- Meal Configurations
+        meal_included INTEGER DEFAULT 0,
+        included_meal_type TEXT DEFAULT 'BB',
+        
+        -- Weekend & Bed Defaults
+        is_weekend_flat INTEGER DEFAULT 1,
+        default_extra_bed_rate INTEGER DEFAULT 0,
+        
+        -- Surcharges stored as JSON Objects for maximum flexibility
+        -- e.g., '{"haram": 150, "city": 0}'
+        view_surcharges TEXT DEFAULT '{}',
+        -- e.g., '{"bb": 40, "iftar": 80, "suhoor": 80}'
+        meal_surcharges TEXT DEFAULT '{}',
+        
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+
+    CREATE TABLE IF NOT EXISTS static_seasons (
+        season_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hotel_id TEXT NOT NULL,
+        
+        description TEXT,
+        start_date TEXT NOT NULL, -- Format: 'MM-DD' (e.g., '02-23')
+        end_date TEXT NOT NULL,   -- Format: 'MM-DD'
+        
+        -- Weekday Pricing
+        weekday_sd_rate INTEGER NOT NULL,
+        weekday_eb_rate INTEGER DEFAULT 0,
+        
+        -- Weekend Pricing
+        weekend_sd_rate INTEGER NOT NULL,
+        weekend_eb_rate INTEGER DEFAULT 0,
+        
+        FOREIGN KEY (hotel_id) REFERENCES static_hotels(hotel_id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS markup_rules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_code TEXT DEFAULT 'DEFAULT',

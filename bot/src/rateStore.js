@@ -1,17 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-
-const jsonPath = path.join(__dirname, 'savedRates.json');
-
-function loadRates() {
-  if (!fs.existsSync(jsonPath)) return [];
-  try { return JSON.parse(fs.readFileSync(jsonPath, 'utf8')); } 
-  catch (err) { return []; }
-}
+const { getDatabase } = require('./database'); // 🛡️ NEW: Import Database
 
 function isWeekend(dateObj) {
   const day = dateObj.getDay(); 
-  return day === 4 || day === 5; 
+  return day === 4 || day === 5; // Thursday & Friday
 }
 
 function isDateInSeason(dateObj, seasonStart, seasonEnd) {
@@ -19,7 +10,7 @@ function isDateInSeason(dateObj, seasonStart, seasonEnd) {
   const d = String(dateObj.getDate()).padStart(2, '0');
   const currentMMDD = `${m}-${d}`;
   if (seasonStart <= seasonEnd) return currentMMDD >= seasonStart && currentMMDD <= seasonEnd;
-  return currentMMDD >= seasonStart || currentMMDD <= seasonEnd;
+  return currentMMDD >= seasonStart || currentMMDD <= seasonEnd; // Wraps around New Year
 }
 
 function normalizeKey(text) {
@@ -29,10 +20,13 @@ function normalizeKey(text) {
   if (t.includes('haram')) return 'haram';
   if (t.includes('city')) return 'city';
   
-  // Meal Normalization
+  // 🛡️ Meal Normalization Fix (Mapped to DB columns)
   if (t.includes('suhoor') && t.includes('iftar')) return 'suhoor_iftar';
-  if (t.includes('suhoor') || t.includes('sehri')) return 'suhoor';
-  if (t.includes('iftar')) return 'iftar';
+  
+  // Maps all suhoor variations to "sahour" to match your DB
+  if (t.includes('suhoor') || t.includes('sehri') || t.includes('sahour') || t.includes('sohor')) return 'sahour';
+  
+  if (t.includes('iftar') || t.includes('aftari')) return 'iftar';
   if (t.includes('bb') || t.includes('breakfast')) return 'bb';
   if (t.includes('hb') || t.includes('half')) return 'hb';
   if (t.includes('fb') || t.includes('full')) return 'fb';
@@ -41,70 +35,92 @@ function normalizeKey(text) {
 }
 
 function checkSavedRate(queryHotel, checkIn, checkOut, pax, roomType, requestedView, requestedMeal) {
-  const allHotels = loadRates();
-  const hotelData = allHotels.find(h => 
-    h.hotel_info.name.toLowerCase() === queryHotel.toLowerCase() || 
-    h.hotel_info.aliases.some(a => queryHotel.toLowerCase().includes(a.toLowerCase()))
-  );
+  const db = getDatabase();
 
-  if (!hotelData) return null;
+  // 1. Fetch all hotels to perform alias matching
+  const allHotels = db.prepare("SELECT * FROM static_hotels").all();
+  
+  const hotelData = allHotels.find(h => {
+      let aliases = [];
+      try { aliases = JSON.parse(h.aliases); } catch(e) {}
+      return h.hotel_name.toLowerCase() === queryHotel.toLowerCase() || 
+             aliases.some(a => queryHotel.toLowerCase().includes(a.toLowerCase()));
+  });
+
+  if (!hotelData) return null; // Not a static rate hotel
+
+  // 2. Fetch Seasons for this specific hotel
+  const seasons = db.prepare("SELECT * FROM static_seasons WHERE hotel_id = ?").all(hotelData.hotel_id);
 
   let currentDate = new Date(checkIn);
   const end = new Date(checkOut);
   if (isNaN(currentDate.getTime()) || isNaN(end.getTime())) return null;
 
-  const rules = hotelData.rate_rules;
-  const surcharges = rules.surcharges || { views: {}, meals: {} };
+  // 3. Parse JSON Surcharges from DB
+  let viewSurcharges = {};
+  let mealSurcharges = {};
+  try { viewSurcharges = JSON.parse(hotelData.view_surcharges); } catch(e) {}
+  try { mealSurcharges = JSON.parse(hotelData.meal_surcharges); } catch(e) {}
   
   const viewKey = normalizeKey(requestedView);
-  const viewCost = surcharges.views[viewKey] || 0;
+  const viewCost = viewSurcharges[viewKey] || 0;
 
-  // 1. Determine Meal Rate Per Person
+  // 4. Determine Meal Rate Per Person
   let mealKey = normalizeKey(requestedMeal);
   let perPersonMealRate = 0;
   let finalMealLabel = 'RO';
 
-  if (rules.meal_included) {
-    finalMealLabel = rules.included_meal_type || 'BB';
-    perPersonMealRate = 0; // Already in base
+  if (hotelData.meal_included === 1) {
+    finalMealLabel = hotelData.included_meal_type || 'BB';
+    perPersonMealRate = 0; // Already in base rate
   } else if (mealKey && mealKey !== 'ro') {
-    perPersonMealRate = surcharges.meals[mealKey] || 0;
+    perPersonMealRate = mealSurcharges[mealKey] || 0;
     finalMealLabel = mealKey.toUpperCase().replace('_', ' + ');
   }
 
-  // 2. FORCE PAX CHECK (Fix for Double/Single)
-  // If the query is "Double", pax should be at least 2.
+  // 5. FORCE PAX CHECK (Fix for Double/Single)
   let effectivePax = parseInt(pax) || 2;
-  const rt = roomType.toUpperCase();
+  const rt = (roomType || '').toUpperCase();
   if (rt.includes('DOUBLE') || rt.includes('DBL') || rt.includes('TWIN')) {
       if (effectivePax < 2) effectivePax = 2;
   } else if (rt.includes('TRIPLE') || rt.includes('TRP')) {
       if (effectivePax < 3) effectivePax = 3;
   } else if (rt.includes('QUAD')) {
       if (effectivePax < 4) effectivePax = 4;
+  } else if (rt.includes('QUINT')) {
+      if (effectivePax < 5) effectivePax = 5;
   }
 
   let breakdown = [];
   let validSequence = true;
 
+  // 6. Calculate Night by Night
   while (currentDate < end) {
-    const season = hotelData.seasons.find(s => isDateInSeason(currentDate, s.start, s.end));
+    // Find matching season in DB array
+    const season = seasons.find(s => isDateInSeason(currentDate, s.start_date, s.end_date));
     if (!season) { validSequence = false; break; }
 
     const isWknd = isWeekend(currentDate);
-    const rateBlock = (isWknd && !rules.is_weekend_flat) ? season.rates.weekend : season.rates.weekday;
+    const useWeekendRates = isWknd && hotelData.is_weekend_flat === 0;
     
-    let dailyBase = rateBlock.single_double;
+    // Pull correct rates from DB Columns
+    let dailyBase = useWeekendRates ? season.weekend_sd_rate : season.weekday_sd_rate;
+    let costPerBed = useWeekendRates ? season.weekend_eb_rate : season.weekday_eb_rate;
+    
+    // Fallback to default extra bed rate if season doesn't specify one
+    if (costPerBed === 0 || costPerBed === null) {
+        costPerBed = hotelData.default_extra_bed_rate;
+    }
+
     let dailyExtra = 0;
 
-    // Extra Bed
-    if (effectivePax > rules.flat_till_pax) {
-       const extraBedsNeeded = effectivePax - rules.flat_till_pax;
-       const costPerBed = (rateBlock.extra_bed !== undefined) ? rateBlock.extra_bed : (rules.default_extra_bed_rate || 0);
+    // Calculate Extra Beds Needed
+    if (effectivePax > hotelData.flat_till_pax) {
+       const extraBedsNeeded = effectivePax - hotelData.flat_till_pax;
        dailyExtra = extraBedsNeeded * costPerBed;
     }
 
-    // 🧮 CALCULATION
+    // 🧮 FINAL CALCULATION
     const nightlyTotal = dailyBase + dailyExtra + viewCost + (perPersonMealRate * effectivePax);
     breakdown.push({ price: nightlyTotal });
 
@@ -114,7 +130,7 @@ function checkSavedRate(queryHotel, checkIn, checkOut, pax, roomType, requestedV
   if (!validSequence || breakdown.length === 0) return null;
 
   return {
-    hotel: hotelData.hotel_info.name,
+    hotel: hotelData.hotel_name,
     currency: "SAR",
     room_descriptor: roomType,
     applied_view: (viewKey && viewKey !== 'city') ? (requestedView || viewKey.toUpperCase()) : '', 
