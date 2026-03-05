@@ -779,51 +779,56 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
             }
         }
     }
+
     // ============================================================
     // 👤 PRIVATE MESSAGE AUTO-REPLY
     // ============================================================
-    // If it is NOT a group message (doesn't end in @g.us), it's a DM.
-//     if (!groupId?.endsWith('@g.us')) {
-//         // Only reply if they actually sent some text, to avoid spamming system events
-//         if (rawText.trim()) {
-//             const autoReply = `*Salam! 👋*
+    // Ensure groupId exists, is NOT a group, and is NOT a status broadcast
+    if (groupId && !groupId.endsWith('@g.us') && !groupId.includes('broadcast')) {
+        // Only reply if they actually sent some text, to avoid spamming system events
+        if (rawText && rawText.trim()) {
+            const autoReply = `*Salam! 👋*
 
-// Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
+Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
 
-// *🤖 Main Kaisay Kaam Karta Hoon:*
-// Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
+*🤖 Main Kaisay Kaam Karta Hoon:*
+Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
 
-// *⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
+*⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
 
-// 📞 *Contacts:*
-// • *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-// • *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
-// *(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
+*(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
 
-// ---
+---
 
-// *Salam! 👋*
+*Salam! 👋*
 
-// I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
+I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
 
-// *🤖 How I Work:*
-// When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
+*🤖 How I Work:*
+When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
 
-// *⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
+*⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
 
-// 📞 *Contacts:*
-// • *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-// • *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
 
-// *(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
+*(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
 
-//             await sock.sendMessage(groupId, { text: autoReply });
-//         }
-//         return; // Stop processing so it doesn't trigger the rest of the bot
-//     }
+            try {
+                await sock.sendMessage(groupId, { text: autoReply });
+            } catch (err) {
+                console.error("Failed to send auto-reply to DM:", err);
+            }
+        }
+        return; // Stop processing so it doesn't trigger the rest of the bot
+    }
 
-    if (!rawText.trim()) return
+    if (!rawText || !rawText.trim()) return;
 
     // ============================================================
     // 🛑 TRANSPORT & CAB BOOKING FILTER
@@ -834,8 +839,7 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
         console.log("🚕 Transport/Cab booking detected. Ignoring.");
         return; // Stops the bot from processing this message
     }
-
-
+    
 // ============================================================
     // 👑 COMMAND MODE: OWNER OVERRIDE (Bypasses Employee Check)
     // ============================================================
@@ -3014,7 +3018,7 @@ app.get('/local-rates', (req, res) => {
         const { getDatabase } = require('./database');
         const db = getDatabase();
 
-const rawQuotes = db.prepare(`
+        const rawQuotes = db.prepare(`
             SELECT 
                 q.id,
                 q.vendor_hotel_name,
@@ -3029,8 +3033,8 @@ const rawQuotes = db.prepare(`
                 cq.room_type AS requested_room,
                 pq.original_text AS client_original_text
             FROM vendor_quotes q
-            LEFT JOIN vendor_requests vr ON q.request_id = vr.id     -- 🛡️ FIX: Changed to LEFT JOIN
-            LEFT JOIN child_queries cq ON vr.child_id = cq.id        -- 🛡️ FIX: Changed to LEFT JOIN
+            LEFT JOIN vendor_requests vr ON q.request_id = vr.id 
+            LEFT JOIN child_queries cq ON vr.child_id = cq.id 
             LEFT JOIN parent_queries pq ON cq.parent_id = pq.id 
             LEFT JOIN groups g ON vr.vendor_group_id = g.group_id
             ORDER BY q.created_at DESC
@@ -3040,7 +3044,6 @@ const rawQuotes = db.prepare(`
             let parsed = {};
             try { parsed = JSON.parse(row.full_json); } catch (e) {}
 
-            // 🛡️ 1. BULLETPROOF ROOM TYPE
             let baseType = '';
             if (parsed.raw_vendor_data?.offered_room_type && parsed.raw_vendor_data.offered_room_type.trim() !== '') {
                 baseType = parsed.raw_vendor_data.offered_room_type;
@@ -3051,7 +3054,6 @@ const rawQuotes = db.prepare(`
                 baseType = parsed.room_type || row.requested_room || 'ROOM';
             }
 
-            // 🛡️ 2. BULLETPROOF AVERAGE RATE
             let averageRate = 0;
             if (Array.isArray(parsed.breakdown) && parsed.breakdown.length > 0) {
                 const totalBase = parsed.breakdown.reduce((sum, day) => sum + (day.base_rate || day.net_daily || day.price || 0), 0);
@@ -3060,7 +3062,6 @@ const rawQuotes = db.prepare(`
                 averageRate = parsed.total_price || row.quoted_price || 0;
             }
 
-            // 🛡️ 3. BULLETPROOF EXTRA BED
             let extraBedVal = 0;
             if (Array.isArray(parsed.raw_vendor_data?.split_rates) && parsed.raw_vendor_data.split_rates.length > 0) {
                 const ebs = parsed.raw_vendor_data.split_rates.map(s => s.extra_bed_rate || 0);
@@ -3069,7 +3070,6 @@ const rawQuotes = db.prepare(`
             if (extraBedVal === 0) extraBedVal = parsed.raw_vendor_data?.extra_bed_price || 0;
             if (extraBedVal === 0) extraBedVal = parsed.extra_bed_price || 0;
 
-            // 🛡️ 4. CLEAN HTML SPLITS (No complex grouping, just the raw splits)
             let displayRateHTML = "";
             if (Array.isArray(parsed.raw_vendor_data?.split_rates) && parsed.raw_vendor_data.split_rates.length > 1) {
                 displayRateHTML = `
@@ -3089,7 +3089,6 @@ const rawQuotes = db.prepare(`
                 displayRateHTML = `<div class="avg-rate">${singleRate} SAR</div>`;
             }
 
-            // 🛡️ 5. MEALS & VIEWS
             let mealText = parsed.applied_meal || parsed.raw_vendor_data?.base_meal_plan || 'RO';
             const mealSupp = parsed.meal_supplement || parsed.raw_vendor_data?.meal_price_per_pax || 0;
             if (mealSupp > 0) mealText += ` <span style="color:#e74c3c; font-size:10px; font-weight:bold;">(+${mealSupp})</span>`;
@@ -3109,6 +3108,7 @@ const rawQuotes = db.prepare(`
             const formattedDate = `${dateObj.toLocaleDateString('en-GB')}<br><span style="color:#94a3b8; font-size:10px;">${dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>`;
 
             return {
+                id: row.id, // 🛡️ NEW: Passed ID for editing/deleting
                 rawTimestamp: dateObj.getTime(),
                 rawPrice: averageRate,
                 rawCheckIn: row.check_in || '',    
@@ -3126,7 +3126,6 @@ const rawQuotes = db.prepare(`
                 clientText: row.client_original_text || 'No client text available',
                 rawText: row.raw_reply_text || 'No text recorded',
                 rawJson: row.full_json || '{}',
-                // 🛡️ NEW: URL-encoded JSON for the frontend Stitcher Engine
                 encodedJson: encodeURIComponent(row.full_json || '{}')
             };
         });
@@ -3135,6 +3134,48 @@ const rawQuotes = db.prepare(`
     } catch (err) {
         console.error("Local Rates Route Error:", err);
         res.status(500).send("Error loading local rates.");
+    }
+});
+
+// ==========================================
+// ✏️ EDIT QUOTE API
+// ==========================================
+app.post('/local-rates/edit/:id', express.urlencoded({ extended: true }), (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        const { vendor_hotel_name, quoted_price, full_json } = req.body;
+        
+        // Safety check to ensure JSON is valid before saving
+        try { JSON.parse(full_json); } catch(e) { 
+            return res.status(400).send("Invalid JSON format. Please go back and correct it."); 
+        }
+
+        db.prepare(`
+            UPDATE vendor_quotes 
+            SET vendor_hotel_name = ?, quoted_price = ?, full_json = ? 
+            WHERE id = ?
+        `).run(vendor_hotel_name.trim(), parseFloat(quoted_price) || 0, full_json, req.params.id);
+        
+        res.redirect('/local-rates');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Failed to update rate.");
+    }
+});
+
+// ==========================================
+// 🗑️ DELETE QUOTE API
+// ==========================================
+app.post('/local-rates/delete/:id', (req, res) => {
+    try {
+        const { getDatabase } = require('./database');
+        const db = getDatabase();
+        db.prepare("DELETE FROM vendor_quotes WHERE id = ?").run(req.params.id);
+        res.redirect('/local-rates');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Failed to delete rate.");
     }
 });
 
