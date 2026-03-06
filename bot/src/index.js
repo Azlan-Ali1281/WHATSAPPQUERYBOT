@@ -1082,8 +1082,11 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         // 🛡️ FIX 4: CHATTER CLEANER (Removed 'check' so date anchors survive)
         .replace(/\b(salam|bhai|hi|hello|dear|sir|madam|please|plz|kindly|need|want|booking|rates|price|prices|amount|cost)\b/gi, ' ')
         
-// 🛡️ FIX 4.5: KILL "HOTEL MAK:" LABELS (Prevents them from becoming orphan hotels)
-        .replace(/\bhotel\s*(mak|med|makkah|madina|madinah)\s*[:\-]?\s*/gi, '\n')
+// 🛡️ FIX 4.5: KILL CITY HOTEL LABELS (Prevents them from becoming orphan hotels)
+        // Kills "Madinah Hotel:", "Medina Hotel :", "Hotel Madinah" instantly
+        .replace(/\b(?:hotel\s*(?:med|madina|madinah)|(?:med|madina|madinah)\s*hotel)\s*[:\-]?\s*/gi, '\n')
+        // Kills "Hotel Makkah:" but explicitly leaves "Makkah Hotel" alone for now
+        .replace(/\bhotel\s*(mak|makkah)\s*[:\-]?\s*/gi, '\n')
         
         // 🛡️ FIX 4.6: "OR SIMILAR" VAPORIZER 👈 ADD THIS NEW BLOCK!
         // Deletes client padding so "Land premium or similar" cleanly becomes "Land premium"
@@ -1441,27 +1444,39 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           const cleaned = await sanitizeHotelNames(globalHotels);
           console.log("✅ Result:", cleaned);
 
+          // 🛡️ ANTI-SHIFTING SAFETY NET (Phase 1)
+          if (Array.isArray(cleaned) && cleaned.length !== globalHotels.length) {
+              console.log("🚨 CRITICAL: AI returned mismatched array length! Falling back to raw names to prevent corruption.");
+              cleaned = globalHotels.map(h => h); // Force it back to raw names
+          }
+
+// ============================================================
+          // 🛡️ FIX: "MAKKAH HOTEL" & "MADINAH HOTEL" LABEL BUGS
           // ============================================================
-          // 🛡️ FIX: "MAKKAH HOTEL" LABEL BUG (Post-Sanitization)
-          // ============================================================
-          // Logic: Now that names are clean ("Makah hotel:" -> "Makkah Hotel"), 
-          // we check if "Makkah Hotel" exists alongside other hotels.
           
+          // 1. MAKKAH LOGIC: Only drop if there are OTHER real hotels found alongside it
           const makkahIndex = cleaned.findIndex(h => h && h.toUpperCase() === 'MAKKAH HOTEL');
           const hasOthers = cleaned.some((h, i) => h && i !== makkahIndex);
 
           if (makkahIndex !== -1 && hasOthers) {
                console.log(`🧹 Dropping 'Makkah Hotel' (Label) post-sanitization.`);
-               cleaned[makkahIndex] = "DROP_ME"; // Mark for deletion
+               cleaned[makkahIndex] = "DROP_ME"; 
           }
 
-          // ============================================================
-          // 🗺️ MAP RAW -> CLEAN
-          // ============================================================
-          globalHotels.forEach((raw, i) => { 
-              if (cleaned[i] === "DROP_ME") {
-                  return; // 🚫 Skip adding this to the map (effectively deletes it)
-              }
+          // 2. MADINAH LOGIC: "Madinah/Medina Hotel" is NEVER a real hotel. Drop instantly.
+          const madinahIndex = cleaned.findIndex(h => h && /^(MADINAH HOTEL|MEDINA HOTEL|MADINAH|MEDINA)$/i.test(h.trim()));
+          if (madinahIndex !== -1) {
+               console.log(`🧹 Dropping 'Madinah/Medina Hotel' (Label) post-sanitization.`);
+               cleaned[madinahIndex] = "DROP_ME"; 
+          }
+// ============================================================
+      // 🗺️ MAP RAW -> CLEAN
+      // ============================================================
+      globalHotels.forEach((raw, i) => { 
+          if (cleaned[i] === "DROP_ME") {
+              sanitizedMap[raw] = "DROP_ME"; // 👈 Explicitly save the kill command!
+              return; 
+          }
               
               if (cleaned[i]) {
                   sanitizedMap[raw] = cleaned[i];
@@ -1599,54 +1614,39 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
 // --- SANITIZATION & LOOP ---
 
-        let rawSanitizedResults = await sanitizeHotelNames(potentialHotels);
-        
-        // 🛡️ NEW FIX: MULTI-LABEL DROPPER (Inside Phase 2)
-        // We must apply the label dropper here so the second AI call knows what to kill
-        if (Array.isArray(rawSanitizedResults)) {
-            const labelIndexes = [];
-            rawSanitizedResults.forEach((h, i) => {
-                if (h && /^(MAKKAH HOTEL|MADINAH HOTEL|MAKKAH|MADINAH)$/i.test(h.trim())) {
-                    labelIndexes.push(i);
-                }
-            });
-            // Ensure there is at least one real hotel before dropping labels
-            const hasRealHotels = rawSanitizedResults.some((h, i) => h && !labelIndexes.includes(i));
-            if (hasRealHotels && labelIndexes.length > 0) {
-                labelIndexes.forEach(idx => rawSanitizedResults[idx] = "DROP_ME");
-            }
-        }
-        
+// 🚀 BYPASS PHASE 2 AI (MASSIVE SPEED & ACCURACY UPGRADE)
+        // We already perfectly mapped the hotels in Phase 1! Do not ask the AI again.
         let sanitizedHotels = [];
         const finalSanitizedMap = {}; 
 
-        potentialHotels.forEach((raw, index) => {
-            const matchedName = (Array.isArray(rawSanitizedResults) && rawSanitizedResults[index]) ? rawSanitizedResults[index] : null;
+        potentialHotels.forEach(raw => {
+            // Look up the exact clean name from our perfect Phase 1 map
+            const matchedName = sanitizedMap[raw] || null;
             
-            // 🛑 THE HARD STOP: If it's a label, kill it instantly!
-            // This prevents the fallbacks below from accidentally resurrecting it.
+            // 🛑 THE HARD STOP: If Phase 1 killed it, keep it dead!
             if (matchedName === 'DROP_ME') {
-                console.log(`🗑️ Dropping label inside Phase 2: "${raw}"`);
-                return; // Skips the rest of the loop for this item
+                console.log(`🗑️ Dropping junk (Caught by Phase 1 Map): "${raw}"`);
+                return; 
             }
 
             const originalLine = originalLines.find(ol => ol.toLowerCase().includes(raw.toLowerCase())) || raw;
             const hasStrongKeyword = /hotel|fundaq|fandaq|saif|majd|dar|tower|inn|suites|stay|voco|pullman|swiss|hilton|meridien|emaar|royal|fairmont|zamzam|makkah|nabras|nebras|taiba|sky\s*view|arkan|manar|plaza|palace|qasr|maqam|resort|boutique/i.test(originalLine);
             
-            const isJunkHotel = /room|bed|pax|guest|dbl|double|trp|triple|quad|quint|suite|breakfast|bb|ro|hb|fb|meal|view|haram|city|kaaba|night|days/i.test(raw);
+            // 🛡️ Added "dpuble" here to catch the specific typo!
+            const isJunkHotel = /room|bed|pax|guest|dbl|double|dpuble|trp|triple|quad|quint|suite|breakfast|bb|ro|hb|fb|meal|view|haram|city|kaaba|night|days/i.test(raw);
             const hasNumbers = /\d/.test(raw);
             const wordCount = raw.trim().split(/\s+/).length;
             const looksLikePerfectHotelName = !hasNumbers && !isJunkHotel && wordCount >= 2 && wordCount <= 5;
 
-            // 🛡️ UPDATED GATE: Removed the DROP_ME check from here since the Hard Stop handles it
             if (matchedName || (hasStrongKeyword && raw.length > 3) || looksLikePerfectHotelName) {
                 const finalName = matchedName ? matchedName : raw; 
                 sanitizedHotels.push(finalName);
                 finalSanitizedMap[raw] = finalName;
             } else {
-                console.log(`🗑️ Dropping non-hotel junk: "${raw}"`);
+                console.log(`🗑️ Dropping non-hotel junk inside block: "${raw}"`);
             }
         });
+
                 // 2. Remove Duplicates & Maintain "Again/Same" logic
         sanitizedHotels = [...new Set(sanitizedHotels)];
 
@@ -1915,33 +1915,35 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
         return;
       }
 
+// ============================================================
+      // 🛡️ 4. FINAL DEDUPLICATION (The "Bulletproof Rule")
       // ============================================================
-      // 🛡️ 4. FINAL DEDUPLICATION (The "Simple Rule")
-      // ============================================================
-      // Rule: SAME HOTEL & SAME DATES & SAME ROOM TYPE -> NEVER REPEAT
-      
       const uniqueQueries = [];
       const seenSignatures = new Set();
 
       for (const q of allQueries) {
-          // 1. Normalize Hotel Name for Comparison ONLY
+          // 1. Ultra-Normalize Hotel Name
           const cleanName = (sanitizedMap[q.hotel] || q.hotel).toLowerCase()
               .replace(/\b(makkah|madinah|hotel|hotels|convention|towers|tower|jabal|omar|al|residence|suites|inn|view|guest|house)\b/gi, '')
-              .replace(/[^a-z0-9]/g, '') // Remove symbols
+              .replace(/[^a-z0-9]/g, '') 
               .trim();
 
-          // 2. Create the Signature
-          const signature = `${cleanName}|${q.check_in}|${q.check_out}|${q.room_type}`;
+          // 2. Ultra-Normalize Room Type (Strips spaces, brackets, and "Pax" text)
+          const cleanRoom = (q.room_type || '').toLowerCase()
+              .replace(/\b(pax)\b/gi, '')
+              .replace(/[^a-z0-9]/g, ''); 
 
-          // 3. Check & Push (FIXED LOGIC)
+          // 3. Create the Signature
+          const signature = `${cleanName}|${q.check_in}|${q.check_out}|${cleanRoom}`;
+
           if (!seenSignatures.has(signature)) {
               seenSignatures.add(signature);
               uniqueQueries.push(q);
           } else {
-              console.log(`🗑️ Duplicate Skipped: ${q.hotel} (${q.check_in})`);
+              console.log(`🗑️ Duplicate Skipped: ${q.hotel} (${q.check_in} - ${q.room_type})`);
           }
       }
-      
+
       // Update the main list to use the unique ones
       const finalQueries = uniqueQueries;
 
@@ -2298,6 +2300,71 @@ const requireAuth = (req, res, next) => {
     }
 };
 
+// ==========================================
+// 📊 ROUTE: LOCAL RATE ENGINE LOGS (AGGREGATED)
+// ==========================================
+app.get('/rate-logs', requireAuth,(req, res) => {
+  
+
+    try {
+        // Fetch raw logs, ordered by child_id so they group perfectly, and by date for the breakdown
+        const rawLogs = db.prepare(`
+            SELECT 
+                id, child_id, hotel_name, night_date, vendor_name, 
+                base_rate, raw_vendor_text, is_stitched, 
+                datetime(created_at, 'localtime') as logged_at
+            FROM local_engine_nights
+            ORDER BY child_id DESC, night_date ASC
+            LIMIT 5000
+        `).all();
+
+        // 🧠 Group the nights by child_id
+        const groupedLogsMap = {};
+        
+        rawLogs.forEach(log => {
+            if (!groupedLogsMap[log.child_id]) {
+                groupedLogsMap[log.child_id] = {
+                    child_id: log.child_id,
+                    hotel_name: log.hotel_name,
+                    start_date: log.night_date,
+                    end_date: log.night_date,
+                    vendors: new Set(),
+                    total_base_rate: 0,
+                    is_stitched: log.is_stitched, // Defaults to single, turns true if ANY night is stitched
+                    logged_at: log.logged_at,
+                    nights: []
+                };
+            }
+            
+            const group = groupedLogsMap[log.child_id];
+            
+            // Add the night details
+            group.nights.push(log);
+            group.vendors.add(log.vendor_name);
+            group.total_base_rate += log.base_rate;
+            
+            // Expand the date range
+            if (log.night_date < group.start_date) group.start_date = log.night_date;
+            if (log.night_date > group.end_date) group.end_date = log.night_date;
+            
+            // If even one night was stitched from a different quote, mark the whole query as Stitched
+            if (log.is_stitched) group.is_stitched = 1; 
+        });
+
+const logs = Object.values(groupedLogsMap).map(g => {
+            g.vendors = Array.from(g.vendors);
+            return g;
+        });
+
+        // 🛡️ THE FIX: Force JavaScript to sort newest first (Descending)
+        logs.sort((a, b) => b.child_id - a.child_id);
+
+        res.render('rate_logs', { logs });
+    } catch (err) {
+        console.error("Error fetching rate logs:", err);
+        res.status(500).send("Database error or table does not exist yet.");
+    }
+});
 // ❌ REMOVE the global app.use('/', requireAuth) line completely. 
 // Instead, we inject it specifically into the routes below.
 

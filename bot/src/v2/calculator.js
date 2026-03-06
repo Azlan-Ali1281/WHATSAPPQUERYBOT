@@ -149,34 +149,72 @@ async function calculateQuote(childQuery, vendorText, preParsedData = null) {
     // ======================================================
     if (allRates.length === 0) return null;
 
-    const totalRooms = childQuery.rooms || 1;
+const totalRooms = childQuery.rooms || 1;
 
+    // ======================================================
+    // 🧮 1. PAX & DESCRIPTOR LOGIC (HARD-LOCKED)
+    // ======================================================
     const originalRt = (childQuery.room_type || 'DOUBLE').toUpperCase();
     let requestedPaxPerRoom = 2; 
-    if (originalRt.includes('SINGLE')) requestedPaxPerRoom = 1;
-    else if (originalRt.includes('TRIPLE') || originalRt.includes('TRP') || originalRt.includes('TPL')) requestedPaxPerRoom = 3;
+    
+    // Detect if they used special descriptors (Large, Diplomatic, Executive, etc.)
+    const isSpecialDescriptor = /SUITE|FAMILY|ROYAL|PRESIDENTIAL|EXECUTIVE|DIPLOMATIC|GOLDEN|LARGE|SMALL/i.test(originalRt);
+
+    if (originalRt.includes('QUINT')) requestedPaxPerRoom = 5;
     else if (originalRt.includes('QUAD') || originalRt.includes('QAD')) requestedPaxPerRoom = 4;
-    else if (originalRt.includes('QUINT')) requestedPaxPerRoom = 5;
-    else if (originalRt.includes('SUITE') || originalRt.includes('FAMILY')) {
-        requestedPaxPerRoom = Math.ceil((childQuery.persons || 4) / totalRooms);
+    else if (originalRt.includes('TRIPLE') || originalRt.includes('TRP') || originalRt.includes('TPL')) requestedPaxPerRoom = 3;
+    else if (originalRt.includes('DOUBLE') || originalRt.includes('DBL') || originalRt.includes('TWIN')) requestedPaxPerRoom = 2;
+    else if (originalRt.includes('SINGLE') || originalRt.includes('SGL')) requestedPaxPerRoom = 1;
+    else if (isSpecialDescriptor) {
+        // If it's a "Presidential Suite" without a explicit pax word, rely on the persons count
+        requestedPaxPerRoom = Math.ceil((childQuery.persons || 2) / totalRooms);
     } else {
         requestedPaxPerRoom = Math.ceil((childQuery.persons || 2) / totalRooms);
     }
 
-    let vendorBaseCap = vendorData.quoted_base_capacity || 2;
-    const lowerVendorText = vendorText.toLowerCase();
+    // ======================================================
+    // 🧮 2. VENDOR BASE CAPACITY (REVERSE-SEARCH FIX)
+    // ======================================================
+    let vendorBaseCap = vendorData.quoted_base_capacity;
     
-    if (/\b(sgl|single)\b/.test(lowerVendorText)) vendorBaseCap = 1;
-    else if (/\b(dbl|double|tw|twin)\b/.test(lowerVendorText)) vendorBaseCap = 2;
-    else if (/\b(trp|triple)\b/.test(lowerVendorText)) vendorBaseCap = 3;
-    else if (/\b(quad|quard)\b/.test(lowerVendorText)) vendorBaseCap = 4;
-    else if (/\b(quint)\b/.test(lowerVendorText)) vendorBaseCap = 5;
+    // If AI failed to provide base capacity, find the HIGHEST room capacity mentioned in text
+    if (!vendorBaseCap) {
+        const lowerVendorText = vendorText.toLowerCase();
+        if (/\b(quint)\b/.test(lowerVendorText)) vendorBaseCap = 5;
+        else if (/\b(quad|quard)\b/.test(lowerVendorText)) vendorBaseCap = 4;
+        else if (/\b(trp|triple|tpl)\b/.test(lowerVendorText)) vendorBaseCap = 3;
+        else if (/\b(dbl|double|tw|twin)\b/.test(lowerVendorText)) vendorBaseCap = 2;
+        else if (/\b(sgl|single)\b/.test(lowerVendorText)) vendorBaseCap = 1;
+        else vendorBaseCap = isSpecialDescriptor ? requestedPaxPerRoom : 2; 
+    }
 
+    // ======================================================
+    // 🧮 3. EXTRA BEDS & OVERRIDE SHIELD
+    // ======================================================
     let extraBedsPerRoom = 0;
     if (!vendorData.is_flat_rate && requestedPaxPerRoom > vendorBaseCap) {
         extraBedsPerRoom = requestedPaxPerRoom - vendorBaseCap;
     }
 
+    // 🛡️ THE SHIELD: Lock the final room type to EXACTLY what the client requested!
+    let finalOfferedRoom = childQuery.room_type; 
+    
+    // Check if vendor has an extra bed price
+    const hasExtraBedPrice = vendorData.extra_bed_price > 0 || allRates.some(r => r.extra_bed_rate > 0);
+    
+    // 🛑 ONLY override the room type if ALL these conditions are met:
+    // 1. We need extra beds, BUT the vendor didn't give us an extra bed price.
+    // 2. The AI actually suggested a room type.
+    // 3. The AI didn't hallucinate the Hotel Name into the room type.
+    if (extraBedsPerRoom > 0 && !hasExtraBedPrice && vendorData.offered_room_type) {
+        const isHotelHallucination = vendorData.offered_room_type.toLowerCase().includes(childQuery.hotel.toLowerCase().split(' ')[0]);
+        
+        if (!isHotelHallucination && vendorData.offered_room_type.length < 25) {
+            finalOfferedRoom = vendorData.offered_room_type;
+            extraBedsPerRoom = 0; // Wipe EB count since they forced a larger native room
+        }
+    }
+    
     console.log(`🛏️ CALC EB CHECK: requestedPax(${requestedPaxPerRoom}) - baseCap(${vendorBaseCap}) = extraBeds(${extraBedsPerRoom})`);
 
     const rawMeal = childQuery.meal || childQuery.meal_plan || "";

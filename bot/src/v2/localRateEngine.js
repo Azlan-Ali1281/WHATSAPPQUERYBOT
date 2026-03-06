@@ -1,7 +1,27 @@
-// src/v2/localRateEngine.js
 const { db } = require('../database'); 
 const { calculateQuote } = require('./calculator');
 const { buildClientMessage } = require('./formatter');
+
+// ======================================================
+// 🛡️ NEW: AUTO-CREATE LOGGING TABLE
+// ======================================================
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS local_engine_nights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER,
+            hotel_name TEXT,
+            night_date TEXT,
+            vendor_name TEXT,
+            base_rate REAL,
+            raw_vendor_text TEXT,
+            is_stitched INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+} catch (e) {
+    console.error("⚠️ Failed to ensure local_engine_nights table:", e.message);
+}
 
 // 🛡️ Value Scoring System (Apples-to-Apples)
 function getMealScore(meal) {
@@ -20,7 +40,7 @@ function getViewScore(view) {
 }
 
 /**
- * 🔍 Smart Local Rate Engine v3
+ * 🔍 Smart Local Rate Engine v3 (With Deep Audit Logging)
  * Priority 1: Find best single vendor reply covering full range.
  * Priority 2: Stitch multiple replies to cover gaps night-by-night.
  */
@@ -28,8 +48,9 @@ async function processLocalRates(childQuery, sock, quoteData) {
     const requestedHotel = childQuery.hotel;
     const qStart = childQuery.check_in;
     const qEnd = childQuery.check_out;
+    const activeChildId = childQuery.db_child_id || childQuery.child_id || childQuery.id || 0;
 
-    // 🛡️ Select quotes from the last 10 days for deeper archive searching
+    // 🛡️ Select quotes from the last 14 days for deeper archive searching
     const sql = `
         SELECT vq.full_json, vq.raw_reply_text AS vendor_text, g.name as vendor_name
         FROM vendor_quotes vq
@@ -67,18 +88,26 @@ async function processLocalRates(childQuery, sock, quoteData) {
                 if (quote) {
                     quote.vendors_involved = [row.vendor_name]; // Track single vendor
                     singleSourceQuotes.push(quote);
+                    
+                    // 💾 DEEP LOGGING: Insert single-source nights into DB
+                    if (quote.breakdown) {
+                        const stmt = db.prepare(`INSERT INTO local_engine_nights (child_id, hotel_name, night_date, vendor_name, base_rate, raw_vendor_text, is_stitched) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+                        quote.breakdown.forEach(night => {
+                            stmt.run(activeChildId, requestedHotel, night.date, row.vendor_name, night.base_rate, row.vendor_text, 0);
+                        });
+                    }
                 }
             } catch (e) {}
         }
 
-        // If we found full matches and are NOT forced to stitch (like in archive testing), return them
+        // If we found full matches and are NOT forced to stitch, return them
         if (singleSourceQuotes.length > 0 && !childQuery.force_stitch) {
             console.log(`✅ SINGLE SOURCE: Found ${singleSourceQuotes.length} valid full-stay quotes.`);
             if (childQuery.is_archive_test) return singleSourceQuotes;
             return deliverBestQuotes(singleSourceQuotes, sock, quoteData);
         }
 
-        // --- PHASE 2: STITCHING FALLBACK (If Phase 1 fails or stitch is forced) ---
+        // --- PHASE 2: STITCHING FALLBACK ---
         console.log(`🧵 STITCHER: Attempting to combine nights for ${requestedHotel}...`);
         
         const requestedNights = [];
@@ -95,7 +124,8 @@ async function processLocalRates(childQuery, sock, quoteData) {
                 const rates = (data.split_rates || data.rates || []).map(r => ({ 
                     ...r, 
                     _master: data,
-                    _vName: row.vendor_name 
+                    _vName: row.vendor_name,
+                    _vText: row.vendor_text // 👈 NEW: Carry the raw text down into the rate object
                 }));
                 allPotentialRates.push(...rates);
             } catch (e) {}
@@ -136,8 +166,16 @@ async function processLocalRates(childQuery, sock, quoteData) {
         };
 
         const stitchedQuote = await calculateQuote(childQuery, "Stitched Composite Reply", compositeData);
+        
         if (stitchedQuote) {
-            stitchedQuote.vendors_involved = Array.from(vendorsUsed); // Show multiple names
+            stitchedQuote.vendors_involved = Array.from(vendorsUsed); 
+            
+            // 💾 DEEP LOGGING: Insert stitched nights into DB
+            const stmt = db.prepare(`INSERT INTO local_engine_nights (child_id, hotel_name, night_date, vendor_name, base_rate, raw_vendor_text, is_stitched) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+            stitchedNights.forEach(sn => {
+                stmt.run(activeChildId, requestedHotel, sn.date, sn.bestRate._vName, sn.bestRate.rate, sn.bestRate._vText, 1);
+            });
+
             console.log(`⚡ STITCHED SUCCESS: Created composite quote covering full range.`);
             if (childQuery.is_archive_test) return [stitchedQuote];
             return deliverBestQuotes([stitchedQuote], sock, quoteData);
@@ -167,21 +205,19 @@ async function deliverBestQuotes(quotes, sock, quoteData) {
     }
     if (!sock) return winners;
 
-
-        for (const best of winners) {
-            const finalMsg = buildClientMessage(best, 0); 
-            await sock.sendMessage(quoteData.client_group_id, { text: finalMsg }, { 
-                quoted: {
-                    key: { 
-                        remoteJid: quoteData.client_group_id, 
-                        fromMe: false, 
-                        id: quoteData.client_msg_id, 
-                        participant: quoteData.client_participant 
-                    },
-                    message: { conversation: quoteData.original_text || "Local Rate Search" }
-                }
-            });
-        
+    for (const best of winners) {
+        const finalMsg = buildClientMessage(best, 0); 
+        await sock.sendMessage(quoteData.client_group_id, { text: finalMsg }, { 
+            quoted: {
+                key: { 
+                    remoteJid: quoteData.client_group_id, 
+                    fromMe: false, 
+                    id: quoteData.client_msg_id, 
+                    participant: quoteData.client_participant 
+                },
+                message: { conversation: quoteData.original_text || "Local Rate Search" }
+            }
+        });
     }
     return true;
 }

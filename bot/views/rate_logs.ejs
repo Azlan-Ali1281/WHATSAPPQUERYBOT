@@ -1,0 +1,185 @@
+<%- include('partials/header', { title: 'Rate Engine Audit Logs' }) %>
+
+<style>
+    .audit-card {
+        background: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        padding: 25px;
+        margin-top: 20px;
+        margin-bottom: 40px;
+    }
+    .audit-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    .audit-title { margin: 0; color: #2c3e50; font-size: 22px; font-weight: 600; }
+    .audit-search {
+        width: 100%; max-width: 350px; padding: 10px 15px;
+        border: 1px solid #dcdde1; border-radius: 6px; font-size: 14px;
+    }
+    .audit-search:focus { outline: none; border-color: #3498db; }
+    
+    .audit-table { width: 100%; border-collapse: collapse; text-align: left; }
+    .audit-table th { background-color: #f8f9fa; color: #7f8c8d; font-weight: 600; text-transform: uppercase; font-size: 12px; padding: 14px 15px;}
+    
+    /* Parent Row Styling */
+    .parent-row { cursor: pointer; transition: background 0.2s; }
+    .parent-row:hover { background-color: #f4f6f9; }
+    .parent-row td { padding: 16px 15px; border-bottom: 1px solid #f1f2f6; font-size: 14px; color: #34495e; vertical-align: middle; }
+    
+    /* Child/Expanded Row Styling */
+    .child-row { display: none; background-color: #fdfdfd; }
+    .child-container { padding: 20px 40px; border-bottom: 2px solid #e1e8ed; background: #fafbfc;}
+    
+    .nested-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee;}
+    .nested-table th { background: #34495e; color: white; padding: 10px 15px; font-size: 12px;}
+    .nested-table td { padding: 10px 15px; font-size: 13px; border-bottom: 1px solid #eee; }
+    
+    /* Badges & Highlights */
+    .badge-status { padding: 5px 10px; border-radius: 50px; font-size: 11px; font-weight: bold; color: white; text-transform: uppercase; }
+    .badge-stitched { background-color: #e67e22; }
+    .badge-single { background-color: #27ae60; }
+    .vendor-badge { background: #ecf0f1; color: #2c3e50; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-right: 4px; font-weight: bold; display: inline-block;}
+    
+    .price-highlight { color: #27ae60; font-weight: 700; font-size: 15px; }
+    .child-id-highlight { color: #2980b9; font-weight: 600; }
+    .toggle-icon { font-size: 18px; color: #7f8c8d; transition: transform 0.3s; }
+    .expanded .toggle-icon { transform: rotate(180deg); }
+
+    .raw-text-box { 
+        max-height: 80px; width: 100%; min-width: 250px; overflow-y: auto; 
+        background: #f8f9fa; border: 1px solid #e1e8ed; padding: 8px; 
+        font-size: 12px; border-radius: 6px; white-space: pre-wrap; 
+        font-family: 'Courier New', Courier, monospace; color: #555;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="audit-card">
+        <div class="audit-header">
+            <h2 class="audit-title">🔍 Rate Engine Audit Logs</h2>
+            <input type="text" id="searchInput" class="audit-search" placeholder="Search ID, Hotel, or Vendor..." onkeyup="filterTable()">
+        </div>
+
+        <div class="table-responsive">
+            <table class="audit-table" id="logsTable">
+                <thead>
+                    <tr>
+                        <th style="width: 40px;"></th>
+                        <th>Query ID</th>
+                        <th>Hotel Name</th>
+                        <th>Date Range</th>
+                        <th>Vendors Used</th>
+                        <th>Total Base Rate</th>
+                        <th>Logic Type</th>
+                        <th>Logged At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (logs && logs.length > 0) { %>
+                        <% logs.forEach(log => { %>
+                            <tr class="parent-row" onclick="toggleDetails('<%= log.child_id %>')" id="parent-<%= log.child_id %>">
+                                <td style="text-align: center;"><span class="toggle-icon">🔽</span></td>
+                                <td class="child-id-highlight">#<%= log.child_id %></td>
+                                <td style="font-weight: bold;"><%= log.hotel_name %></td>
+                                <td><%= log.start_date %> <span style="color:#bdc3c7;">to</span> <%= log.end_date %></td>
+                                <td>
+                                    <% log.vendors.forEach(v => { %>
+                                        <span class="vendor-badge"><%= v %></span>
+                                    <% }) %>
+                                </td>
+                                <td class="price-highlight"><%= log.total_base_rate %> SAR</td>
+                                <td>
+                                    <% if (log.is_stitched) { %>
+                                        <span class="badge-status badge-stitched">Stitched (<%= log.vendors.length %>)</span>
+                                    <% } else { %>
+                                        <span class="badge-status badge-single">Single Source</span>
+                                    <% } %>
+                                </td>
+                                <td style="color: #95a5a6; font-size: 12px;"><%= log.logged_at %></td>
+                            </tr>
+                            
+                            <tr class="child-row" id="child-<%= log.child_id %>">
+                                <td colspan="8" class="child-container">
+                                    <table class="nested-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 120px;">Night Date</th>
+                                                <th>Winning Vendor</th>
+                                                <th style="width: 100px;">Night Rate</th>
+                                                <th>Raw Extraction Text</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <% log.nights.forEach(night => { %>
+                                                <tr>
+                                                    <td style="font-weight: bold; color: #2c3e50;"><%= night.night_date %></td>
+                                                    <td><span class="vendor-badge"><%= night.vendor_name %></span></td>
+                                                    <td style="color: #27ae60; font-weight: bold;"><%= night.base_rate %> SAR</td>
+                                                    <td>
+                                                        <div class="raw-text-box"><%= night.raw_vendor_text %></div>
+                                                    </td>
+                                                </tr>
+                                            <% }) %>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                        <% }) %>
+                    <% } else { %>
+                        <tr>
+                            <td colspan="8" style="text-align: center; padding: 40px; color: #7f8c8d; font-size: 15px;">
+                                <div style="font-size: 30px; margin-bottom: 10px;">📭</div>
+                                No rate calculations logged yet.
+                            </td>
+                        </tr>
+                    <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Toggle the expansion of the night-by-night breakdown
+    function toggleDetails(childId) {
+        const childRow = document.getElementById('child-' + childId);
+        const parentRow = document.getElementById('parent-' + childId);
+        
+        if (childRow.style.display === 'table-row') {
+            childRow.style.display = 'none';
+            parentRow.classList.remove('expanded');
+        } else {
+            childRow.style.display = 'table-row';
+            parentRow.classList.add('expanded');
+        }
+    }
+
+    // Instant Search / Filter Logic (Filters Parent Rows only)
+    function filterTable() {
+        const input = document.getElementById("searchInput");
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById("logsTable");
+        const parentRows = table.getElementsByClassName("parent-row");
+
+        for (let i = 0; i < parentRows.length; i++) {
+            let rowText = parentRows[i].innerText.toUpperCase();
+            if (rowText.indexOf(filter) > -1) {
+                parentRows[i].style.display = "";
+            } else {
+                parentRows[i].style.display = "none";
+                // Also hide the child row if parent is hidden
+                const childId = parentRows[i].id.split('-')[1];
+                document.getElementById('child-' + childId).style.display = 'none';
+                parentRows[i].classList.remove('expanded');
+            }
+        }
+    }
+</script>
+
+<%- include('partials/footer') %>

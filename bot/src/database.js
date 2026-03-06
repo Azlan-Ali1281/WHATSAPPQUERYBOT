@@ -579,11 +579,10 @@ function registerUnknownGroup(groupId, groupName) {
 }
 
 // 2. Updated to include common variations to ignore
-// 🛡️ FIX: Added MAKKAH, MADINAH, MADINA to generic words
+// 🛡️ FIX: Removed Makkah & Madinah. City names are CRITICAL for sister properties!
 const GENERIC_WORDS = new Set([
   'HOTEL', 'TOWER', 'TOWERS', 'INN', 'SUITES', 'SUITE', 
-  'RESORT', 'APARTMENT', 'APARTMENTS', 'AL', 'EL', 
-  'MAKKAH', 'MADINAH', 'MADINA', 'MECCA', 'MEDINA'
+  'RESORT', 'APARTMENT', 'APARTMENTS', 'AL', 'EL'
 ]);
 
 function splitMeaningfulWords(text) {
