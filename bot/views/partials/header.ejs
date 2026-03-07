@@ -49,7 +49,7 @@
         }
         
         .header-left { display: flex; align-items: center; gap: 16px; }
-        .header-right { display: flex; align-items: center; gap: 20px; }
+        .header-right { display: flex; align-items: center; gap: 15px; }
         .toggle-btn { cursor: pointer; background: #f1f5f9; border: none; padding: 8px; border-radius: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: center; }
         
         /* 🟢 Dynamic Status Pill */
@@ -75,6 +75,10 @@
         }
 
         .user-avatar { width: 36px; height: 36px; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+        
+        /* ⚙️ New Top Settings Button */
+        .top-settings-btn { width: 36px; height: 36px; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-muted); text-decoration: none; transition: all 0.2s; }
+        .top-settings-btn:hover { background: #e2e8f0; color: var(--text-main); }
 
         /* Dashboard Grid */
         .grid-container { padding: 32px; width: 100%; max-width: 1400px; margin: 0 auto; }
@@ -121,43 +125,44 @@
                 <i data-lucide="layout-dashboard"></i> <span class="nav-text">Dashboard</span>
             </a>
             
-<div class="menu-item" onclick="toggleSub('group-nav')">
-            <i data-lucide="users"></i> <span class="nav-text">Groups</span><i data-lucide="chevron-down" class="chevron"></i>
-        </div>
-        <div class="submenu" id="group-nav">
-            <a href="/clients">Client Directory</a>
-            <a href="/vendors">Vendor Mapping</a>
-            <a href="/registry">Hotel Registry DB</a>
-        </div>
+            <div class="menu-item" onclick="toggleSub('group-nav')">
+                <i data-lucide="users"></i> <span class="nav-text">Groups</span><i data-lucide="chevron-down" class="chevron"></i>
+            </div>
+            <div class="submenu" id="group-nav">
+                <a href="/clients">Client Directory</a>
+                <a href="/vendors">Vendor Mapping</a>
+                <a href="/registry">Hotel Registry DB</a>
+            </div>
 
-        <a href="/employees" class="menu-item">
-            <i data-lucide="contact"></i> <span class="nav-text">Staff / Employees</span>
-        </a>
-
-        <a href="/local-rates" class="menu-item">
-            <i data-lucide="activity"></i> <span class="nav-text">Local Rates Engine</span>
-        </a>
-        
-        <a href="/rate-logs" class="menu-item">
-            <i data-lucide="history"></i> <span class="nav-text">Rate Engine Logs</span>
-        </a>
-        
-        <a href="/static-rates" class="menu-item">
-            <i data-lucide="database"></i> <span class="nav-text">Fallback Rates Engine</span>
-        </a>
-        
-        <div class="menu-item" onclick="toggleSub('rules-nav')">
-            <i data-lucide="calculator"></i> <span class="nav-text">Rule Engine</span><i data-lucide="chevron-down" class="chevron"></i>
-        </div>
-        <div class="submenu" id="rules-nav">
-            <a href="/rules/markup">Profit Markups</a>
-            <a href="/rules/limits">Usage Limits</a>
-        </div>
-        
-        <div style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
-            <a href="/logout" class="menu-item" style="color: #ef4444;">
-                <i data-lucide="log-out"></i> <span class="nav-text">Secure Logout</span>
+            <a href="/employees" class="menu-item">
+                <i data-lucide="contact"></i> <span class="nav-text">Staff / Employees</span>
             </a>
+
+            <a href="/local-rates" class="menu-item">
+                <i data-lucide="activity"></i> <span class="nav-text">Local Rates Engine</span>
+            </a>
+            
+            <a href="/rate-logs" class="menu-item">
+                <i data-lucide="history"></i> <span class="nav-text">Rate Engine Logs</span>
+            </a>
+            
+            <a href="/static-rates" class="menu-item">
+                <i data-lucide="database"></i> <span class="nav-text">Fallback Rates Engine</span>
+            </a>
+            
+            <div class="menu-item" onclick="toggleSub('rules-nav')">
+                <i data-lucide="calculator"></i> <span class="nav-text">Rule Engine</span><i data-lucide="chevron-down" class="chevron"></i>
+            </div>
+            <div class="submenu" id="rules-nav">
+                <a href="/rules/markup">Profit Markups</a>
+                <a href="/rules/limits">Usage Limits</a>
+            </div>
+            
+            <div style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                <a href="/logout" class="menu-item" style="color: #ef4444;">
+                    <i data-lucide="log-out"></i> <span class="nav-text">Secure Logout</span>
+                </a>
+            </div>
         </div>
     </aside>
 
@@ -176,6 +181,11 @@
                     <div class="pulse-dot"></div>
                     <span style="font-size: 12px; font-weight: 700;" id="globalStatusText">CHECKING...</span>
                 </div>
+                
+                <a href="/settings" class="top-settings-btn" title="Global Settings">
+                    <i data-lucide="settings" style="width: 18px;"></i>
+                </a>
+                
                 <div class="user-avatar" title="Logged in as Admin">
                     <i data-lucide="shield-check" style="width: 18px; color: #10b981;"></i>
                 </div>

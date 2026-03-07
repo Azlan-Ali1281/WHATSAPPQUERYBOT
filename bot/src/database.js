@@ -40,6 +40,13 @@ db.exec(`
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS global_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    );
+    -- Insert the default ID so it doesn't break on the first run
+    INSERT OR IGNORE INTO global_settings (key, value) VALUES ('human_agent_id', '243159590269138@lid');
+
     -- 🛡️ NEW: Employees Table (Ignored Users)
     CREATE TABLE IF NOT EXISTS employees (
         jid TEXT PRIMARY KEY,
@@ -600,6 +607,23 @@ function splitMeaningfulWords(text) {
   return meaningful;
 }
 
+
+// ============================================================
+// ⚙️ GLOBAL SETTINGS
+// ============================================================
+function getGlobalSetting(key, fallback = '') {
+    const row = db.prepare("SELECT value FROM global_settings WHERE key = ?").get(key);
+    return row ? row.value : fallback;
+}
+
+function setGlobalSetting(key, value) {
+    db.prepare(`
+        INSERT INTO global_settings (key, value) 
+        VALUES (?, ?) 
+        ON CONFLICT(key) DO UPDATE SET value = ?
+    `).run(key, value, value);
+}
+
 function recallLastChildQueries(count) {
     const children = db.prepare('SELECT id FROM child_queries ORDER BY id DESC LIMIT ?').all(count);
     if (!children.length) return { messages: [], cDeleted: 0 };
@@ -698,6 +722,8 @@ module.exports = {
     getOwnerGroupsDB,
     updateChildHotelName,
     getVendorsForHotelDB,
+    getGlobalSetting, // 👈 ADD THIS
+    setGlobalSetting, // 👈 ADD THIS
     upsertLimitTier,     // 👈 NEW
     assignTierToGroup,   // 👈 NEW
     upsertEmployee, // 👈 NEW

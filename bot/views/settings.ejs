@@ -1,0 +1,71 @@
+<%- include('partials/header', { title: 'Global Bot Settings' }) %>
+
+<style>
+    .settings-card {
+        background: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        padding: 30px;
+        margin-top: 20px;
+        max-width: 600px;
+    }
+    .form-group {
+        margin-bottom: 20px;
+    }
+    .form-group label {
+        display: block;
+        font-weight: 600;
+        color: #2c3e50;
+        margin-bottom: 8px;
+        font-size: 14px;
+    }
+    .form-group input {
+        width: 100%;
+        padding: 12px 15px;
+        border: 1px solid #dcdde1;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+    }
+    .form-group input:focus {
+        border-color: #3498db;
+        outline: none;
+    }
+    .help-text {
+        font-size: 12px;
+        color: #7f8c8d;
+        margin-top: 5px;
+    }
+    .save-btn {
+        background-color: #27ae60;
+        color: white;
+        border: none;
+        padding: 12px 25px;
+        font-size: 15px;
+        font-weight: bold;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .save-btn:hover { background-color: #219653; }
+</style>
+
+<div class="container-fluid">
+    <div class="settings-card">
+        <h2 style="margin-top:0; color:#2c3e50; font-size:22px; margin-bottom: 25px;">⚙️ Global Bot Settings</h2>
+        
+        <form action="/settings/update" method="POST">
+            <div class="form-group">
+                <label for="human_agent_id">Human Agent WhatsApp ID (For Tagging)</label>
+                <input type="text" id="human_agent_id" name="human_agent_id" value="<%= humanAgentId %>" required>
+                <div class="help-text">
+                    This is the person the bot will @mention when a query fails or requires manual assistance. Must end with <code>@lid</code> or <code>@s.whatsapp.net</code>.
+                </div>
+            </div>
+
+            <button type="submit" class="save-btn">Save Settings</button>
+        </form>
+    </div>
+</div>
+
+<%- include('partials/footer') %>

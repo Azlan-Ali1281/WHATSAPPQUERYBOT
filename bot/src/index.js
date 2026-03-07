@@ -30,6 +30,7 @@ const {
     getGroupRoleDB,         // 👈 NEW
     getOwnerGroupsDB,       // 👈 NEW
     getVendorsForHotelDB,   // 👈 NEW
+    getGlobalSetting, // 👈 Add this to your database imports
     getClientCodeDB         // 👈 NEW
 } = require('./database');
 
@@ -450,9 +451,7 @@ function normalizeHotelForAI(hotel = '') {
   let h = hotel.trim();
   if (!h || h.toLowerCase() === 'similar') return null;
 
-// 🛡️ FIX: Address & Zip Code Cleaner (Don't delete the whole line!)
-  // Old: if (/\b\d{5}\b/.test(h)) return null;
-  // New: Remove the zip code, keep the hotel.
+  // 🛡️ FIX: Address & Zip Code Cleaner
   h = h.replace(/\b\d{5}\b/g, '').trim(); 
   
   // Clean address parts
@@ -463,10 +462,8 @@ function normalizeHotelForAI(hotel = '') {
   h = h.replace(/\b(triple|trp)\s*(one|1)\b/gi, 'TripleOne');
   h = h.replace(/\b(fundaq|fudnaq)\b/gi, '');
 
-  // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler)
-  // Added: ashra
-// 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler/Distances)
-  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|tripl|oct|nov|dec|again|check|chk|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra|meter|meters|distance|near)\b/i;
+  // 🛡️ 1. HARD BLOCK: Hallucinations (Dates/Filler/Distances/Generic words)
+  const badPatterns = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|tripl|oct|nov|dec|again|check|chk|plz|please|pax|room|triple|quad|double|booking|nights|date|ashra|meter|meters|distance|near|any|good|star|stars|htl|hotel|hotels)\b/i;
   if (badPatterns.test(h)) return null;
 
   // Kill tiny words like "IN" or "OUT" that might sneak past word boundaries
@@ -476,17 +473,14 @@ function normalizeHotelForAI(hotel = '') {
   if (/^\d{1,2}[\/\-]\d{1,2}/.test(h)) return null;
   if (/^[\d\s\-\/\.]+$/.test(h)) return null;
   if (h.length < 3) return null;
-  if (/^hotel$/i.test(h)) return null;
 
   // 🛡️ 4. HOTEL KEYWORD LIST
-  // Added: hidayah (variations), concord, vision, jiwar, wahba, shourfah, etc.
-  // 🛡️ 4. HOTEL KEYWORD LIST
-  // Added: hidayah (variations), miramar, ruve, nozol, etc.
   const hotelKeywords = /\b(hotel|inn|suites|lamar|emaar|jabal|tower|towers|palace|movenpick|hilton|rotana|front|manakha|nebras|view|residence|grand|plaza|voco|sheraton|accor|pullman|anwar|dar|taiba|saja|emmar|andalusia|royal|shaza|millennium|ihg|marriott|fairmont|clock|al|bakka|retaj|rawda|golden|tulip|kiswa|kiswah|khalil|safwat|madinah|convention|tree|doubletree|tripleone|fundaq|bilal|elaf|kindi|bosphorus|zalal|nuzla|matheer|artal|odst|zowar|miramar|ruve|nozol|diafa|shourfah|manar|iman|harmony|leader|mubarak|wissam|concord|vision|hidayah|hidaya|hedaya)\b/i;
+  
   // 🛡️ NOISE CLEANER
-// Added: qued
   h = h.replace(/\b(single|double|dbl|twin|triple|trp|tripple|quad|qued|quard|room|only|tripl|bed|breakfast|bb|ro)\b/gi, '').trim();
 
+  // ⚠️ CRITICAL: Create the 'words' array BEFORE checking its length!
   const words = h.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
 
@@ -494,7 +488,8 @@ function normalizeHotelForAI(hotel = '') {
   if (words.length === 1) {
     const isBrand = hotelKeywords.test(h);
     const isCode = /^[A-Z]{3,10}$/.test(h);
-    if (!isBrand && !isCode) return null; 
+    // 🛡️ ADDED: If the only word is "Hotel", "Makkah", or "Madinah", nuke it.
+    if ((!isBrand && !isCode) || /^(hotel|makkah|madinah)$/i.test(h)) return null; 
   }
 
   // 🛡️ GUEST NAME BLOCKER
@@ -608,6 +603,66 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
         const senderId = msg.key.participant || msg.key.remoteJid;
         const groupId = msg.key.remoteJid;
         const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+
+
+        // ============================================================
+    // 👤 PRIVATE MESSAGE AUTO-REPLY (BULLETPROOF)
+    // ============================================================
+    // 1. Ensure we don't reply to our own bot's messages (Prevents infinite loops!)
+    if (msg.key.fromMe) return; 
+
+    // 2. Ensure groupId exists, is NOT a group (@g.us), and is NOT a status broadcast
+    if (groupId && !groupId.endsWith('@g.us') && !groupId.includes('broadcast')) {
+        
+        // 3. Only reply if they actually sent some text (ignores image-only or system events)
+        if (rawText && rawText.trim()) {
+            const autoReply = `*Salam! 👋*
+
+Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
+
+*🤖 Main Kaisay Kaam Karta Hoon:*
+Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
+
+*⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
+
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
+
+*(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
+
+---
+
+*Salam! 👋*
+
+I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
+
+*🤖 How I Work:*
+When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
+
+*⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
+
+📞 *Contacts:*
+• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
+• *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
+
+*(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
+
+            try {
+                // Send the auto-reply
+                await sock.sendMessage(groupId, { text: autoReply });
+                console.log(`✉️ Sent Auto-Reply to DM: ${groupId}`);
+            } catch (err) {
+                console.error("Failed to send auto-reply to DM:", err);
+            }
+        }
+        
+        // 4. CRITICAL: Stop processing here so the DM doesn't trigger the group-based bot logic
+        return; 
+    }
+
+    // (The rest of your bot code for Group processing continues below here...)
+    if (!rawText || !rawText.trim()) return;
 
         // 1. Only process messages inside WhatsApp Groups
         const isGroup = groupId.endsWith('@g.us');
@@ -779,56 +834,6 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
             }
         }
     }
-
-    // ============================================================
-    // 👤 PRIVATE MESSAGE AUTO-REPLY
-    // ============================================================
-    // Ensure groupId exists, is NOT a group, and is NOT a status broadcast
-    if (groupId && !groupId.endsWith('@g.us') && !groupId.includes('broadcast')) {
-        // Only reply if they actually sent some text, to avoid spamming system events
-        if (rawText && rawText.trim()) {
-            const autoReply = `*Salam! 👋*
-
-Main HBA Travel & Tours ka B2B Umrah Query Bot hoon, jise HBA Group ne develop kiya hai. 
-
-*🤖 Main Kaisay Kaam Karta Hoon:*
-Jab koi client group mein Umrah hotel ki query bhejta hai, main AI aur rules ke zariye usay samajhta hoon. Phir usay format kar ke vendors ko bhejta hoon (ya saved rates ka direct reply karta hoon). Vendor ke reply aane par, main rates calculate aur compare kar ke final quote client ko bhej deta hoon.
-
-*⚠️ Status:* Main abhi development phase mein hoon, is liye agar koi issue aaye toh zaroor batayein.
-
-📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-• *Bot Details/Bug Reports:* Developer, Azlan Ali  +923162724750 
-
-*(Main sirf designated groups mein kaam karta hoon aur direct messages ka reply nahi kar sakta. Shukriya!)*
-
----
-
-*Salam! 👋*
-
-I am the B2B Umrah Query Bot for HBA Travel & Tours, developed by HBA Group.
-
-*🤖 How I Work:*
-When a client sends a hotel query in the group, I use AI and custom rules to process it. I then format and forward it to relevant vendors (or instantly reply with saved rates). Once a vendor replies, I analyze, calculate, and compare the rates before sending the final quote back to the client.
-
-*⚠️ Status:* I am currently in the development phase, so you might encounter some minor issues. 
-
-📞 *Contacts:*
-• *Queries/Rates Issues:* Reservation Manager, Anas Ali  +923326873756 
-• *Bot Info/Bug Reports:* Developer, Azlan Ali  +923162724750 
-
-*(I only operate inside designated WhatsApp groups and cannot process direct messages. Thank you!)*`;
-
-            try {
-                await sock.sendMessage(groupId, { text: autoReply });
-            } catch (err) {
-                console.error("Failed to send auto-reply to DM:", err);
-            }
-        }
-        return; // Stop processing so it doesn't trigger the rest of the bot
-    }
-
-    if (!rawText || !rawText.trim()) return;
 
     // ============================================================
     // 🛑 TRANSPORT & CAB BOOKING FILTER
@@ -1024,10 +1029,14 @@ When a client sends a hotel query in the group, I use AI and custom rules to pro
         clearPendingQuestion(groupId);
     }
 
+    // 🛡️ THE MULTIPLIER FIX: Vaporize 'x' (Turns "1xDbl" into "1 Dbl" and "1xTpl" into "1 Tpl")
+    // We do this BEFORE the classifier so it doesn't accidentally ignore the query!
+    finalProcessingText = finalProcessingText.replace(/\b(\d+)\s*[xX]\s*(dbl|double|trp|tpl|triple|quad|qued|quint|suite|room|bed)/gi, '$1 $2');
+
     // ✅ PASS 'msg' SO CLASSIFIER CAN CHECK DATABASE
     const type = classifyMessage({ groupRole: role, text: finalProcessingText, msg: msg })
     const universalTypes = extractRoomTypesFromText(finalProcessingText);
-
+    
     console.log('\n----------------------------')
     console.log('Group:', groupId)
     console.log('User ID:', senderId);
@@ -1228,9 +1237,11 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       if (dateBuffer) pairedLines.push(dateBuffer);
 
       // Neighbor Date Fuser (Fallback)
+// Neighbor Date Fuser (Fallback)
       let stage3Lines = [];
-      const strictMonthRegex = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
-
+      // 🛡️ THE FIX: Added \b so "omar" or "lamar" doesn't trigger the "mar" month rule!
+      const strictMonthRegex = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
+      
       for (let i = 0; i < pairedLines.length; i++) {
         let current = pairedLines[i];
         let next = (pairedLines[i+1] || "").trim();
@@ -1256,8 +1267,8 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
 // Final Noise Scrubber
       let effectiveText = stage4Lines
-        // 🛡️ FIX 9: Don't delete the line! Just remove the noise words.
-        .map(line => line.replace(/saudi arabia|street|road|district|jabal omar|ibrahim al khalil/gi, '')) 
+        // 🛡️ FIX 9: Removed "jabal omar" from the kill list so "Address Jabal Omar" survives!
+        .map(line => line.replace(/saudi arabia|street|road|district|ibrahim al khalil/gi, ''))
         .filter(line => !/\b\d{5}\b/.test(line)) 
         .filter(line => {
              const isLong = line.split(' ').length > 15;
@@ -1340,7 +1351,8 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
           }
       }
       
-      const HUMAN_AGENT_ID = '243159590269138@lid'; 
+    // 🛡️ Fetches directly from DB. Uses your original ID as a safety fallback.
+    const HUMAN_AGENT_ID = getGlobalSetting('human_agent_id', '243159590269138@lid');
 
 // 🚨 FAILURE 1: NO VALID BLOCKS (Orphan rescue failed)
       if (blocks.length === 0) {
@@ -1352,10 +1364,13 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
             return;
         }
 
-        console.log("⚠️ ");
+    // 🛡️ WA WEB SAFE MENTION: Ensure proper ID format and provide fallback text
+        const safeMentionId = HUMAN_AGENT_ID.includes('@') ? HUMAN_AGENT_ID : `${HUMAN_AGENT_ID}@s.whatsapp.net`;
+        const displayTag = safeMentionId.split('@')[0];
+
         await sock.sendMessage(groupId, { 
-            text: `@${HUMAN_AGENT_ID.split('@')[0]} `,
-            mentions: [HUMAN_AGENT_ID] 
+            text: `⚠️ *Please Check${displayTag} this query.`,
+            mentions: [safeMentionId] 
         }, { quoted: msg });
         
         return;
@@ -1403,7 +1418,8 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
       // 1. Remove ALL hotels starting with "Any" (e.g. "Any 5 star", "Any good hotel")
       // 2. If NO hotels remain, DROP THE PARENT QUERY COMPLETELY.
 
-      const specificHotels = globalHotels.filter(h => !/^any\b/i.test(h));
+// 🛡️ REINFORCED: Drops anything containing the word "any" (e.g., "for any good hotel")
+    const specificHotels = globalHotels.filter(h => !/\bany\b/i.test(h));
 
       if (specificHotels.length < globalHotels.length) {
           console.log("🧹 Dropped generic 'Any...' hotels.");
@@ -1733,10 +1749,16 @@ if (role === 'CLIENT' && type === 'CLIENT_QUERY') {
 
               const q = { ...qRaw };
               
-              // Only use the fallback if the fallback is ACTUALLY a valid hotel name
-              if (!normalizeHotelForAI(q.hotel)) {
-                  q.hotel = hotel;
-              }
+            // 🛡️ SMART FALLBACK SHIELD
+            // Only use the fallback if the original hotel string is actually a valid name
+            const validFallback = normalizeHotelForAI(hotel); 
+            if (!normalizeHotelForAI(q.hotel)) {
+                if (validFallback) {
+                    q.hotel = hotel;
+                } else {
+                    q.hotel = ''; // Force it to empty so the "Bouncer" kills it below
+                }
+            }
 
               // 🛡️ THE ULTIMATE BOUNCER: Absolute ban on these phrases reaching the database
               const finalClean = q.hotel.toUpperCase().trim();
@@ -3228,6 +3250,43 @@ app.post('/local-rates/edit/:id', express.urlencoded({ extended: true }), (req, 
     } catch (err) {
         console.error(err);
         res.status(500).send("Failed to update rate.");
+    }
+});
+
+// ==========================================
+// ⚙️ GLOBAL SETTINGS PAGE
+// ==========================================
+app.get('/settings', requireAuth, (req, res) => {
+    try {
+        const { getGlobalSetting } = require('./database');
+        const humanAgentId = getGlobalSetting('human_agent_id', '');
+        res.render('settings', { humanAgentId });
+    } catch (err) {
+        console.error("Settings Load Error:", err);
+        res.status(500).send("Error loading settings.");
+    }
+});
+
+app.post('/settings/update', requireAuth, (req, res) => {
+    try {
+        const { setGlobalSetting } = require('./database');
+        const { human_agent_id } = req.body;
+        
+        if (human_agent_id) {
+            let cleanId = human_agent_id.trim();
+            
+            // If the user didn't type an '@', assume it's a standard phone number
+            if (!cleanId.includes('@')) {
+                // Strip spaces, dashes, and '+' signs, then attach the standard WA suffix
+                cleanId = cleanId.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+            }
+            
+            setGlobalSetting('human_agent_id', cleanId);
+        }
+        res.redirect('/settings');
+    } catch (err) {
+        console.error("Settings Update Error:", err);
+        res.status(500).send("Failed to update settings.");
     }
 });
 
